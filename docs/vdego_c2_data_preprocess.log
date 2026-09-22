@@ -1,0 +1,146 @@
+【执行解密】: run_decrypt(key=3rd_party/password.pem, input=/__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/input/vdego-c2-54d601_2026-09-04_01-17-30_30fps, output=/__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps, save_duration=True)
+  -> 0.h265.enc (seq=0)
+[OK] 已生成合并视频: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/video.h265 (来源 1 个文件)
+[OK] 已生成合并 IMU: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/imu.csv (来源 2 个文件)
+[OK] 已生成合并时间戳: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/video_frames_timestamp.csv (来源 2 个文件)
+[INFO] 视频时长: 0:09:57:854:784:000 (已写入 /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/video_duration.txt)
+【解密完成】
+【执行视频切分】: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/video.h265 -> /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_left.mp4, /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_right.mp4
+[INFO] 使用 GPU (hevc_nvenc) 编码: ffmpeg -y -hide_banner -loglevel error -f hevc -framerate 30 -i /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/video.h265 -filter_complex [0:v]split=2[l][r];[l]crop=iw/2:ih:0:0[left];[r]crop=iw/2:ih:iw/2:0[right] -map [left] -c:v hevc_nvenc -qp 18 -g 7 -bf 0 -an -tag:v hvc1 /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_left.mp4 -map [right] -c:v hevc_nvenc -qp 18 -g 7 -bf 0 -an -tag:v hvc1 /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_right.mp4
+[OK] 切分编码完成 (GPU (hevc_nvenc)): /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_left.mp4, /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_right.mp4
+【视频切分完成】: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_left.mp4, /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/cam_right.mp4
+【执行轨迹解算】: 3rd_party/vdego-c2-amvio/amvio --input_dir /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps --output_dir /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio --password_pem 3rd_party/password.pem --config_yaml 3rd_party/vdego-c2-amvio/config.yaml
+【轨迹解算完成】，输出目录: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps
+
+======================================================================
+ 以下为 vio 轨迹解算模块日志
+======================================================================
+=== Amvio run log ===
+log_file: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/run.log
+  uname: Linux modal 4.19.0-gvisor #1 SMP Sun Jan 10 15:06:54 PST 2016 x86_64 x86_64 x86_64 GNU/Linux
+  cwd: /app
+  LD_LIBRARY_PATH: /app/3rd_party/lib:
+  HOME: /root
+[2026-09-16 11:41:16] [INFO] CPU: Model name:          unknown
+[2026-09-16 11:41:16] [INFO] 内存: 377Gi total, 377Gi avail
+[2026-09-16 11:41:16] [INFO] glibc: ldd (Ubuntu GLIBC 2.35-0ubuntu3.14) 2.35
+[2026-09-16 11:41:16] [STAGE] >>> BEGIN 启动
+[2026-09-16 11:41:16] [INFO] argv[0]=3rd_party/vdego-c2-amvio/amvio
+[2026-09-16 11:41:16] [INFO] argv[1]=--input_dir
+[2026-09-16 11:41:16] [INFO] argv[2]=/__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps
+[2026-09-16 11:41:16] [INFO] argv[3]=--output_dir
+[2026-09-16 11:41:16] [INFO] argv[4]=/__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio
+[2026-09-16 11:41:16] [INFO] argv[5]=--password_pem
+[2026-09-16 11:41:16] [INFO] argv[6]=3rd_party/password.pem
+[2026-09-16 11:41:16] [INFO] argv[7]=--config_yaml
+[2026-09-16 11:41:16] [INFO] argv[8]=3rd_party/vdego-c2-amvio/config.yaml
+[2026-09-16 11:41:16] [INFO] 程序目录: /app/3rd_party/vdego-c2-amvio
+[2026-09-16 11:41:16] [INFO] 输入: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps
+[2026-09-16 11:41:16] [INFO] 输出: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio
+[2026-09-16 11:41:16] [INFO] 配置: /app/3rd_party/vdego-c2-amvio/config.yaml
+[2026-09-16 11:41:16] [INFO] 输入类型: directory
+[2026-09-16 11:41:16] [CHECK] 可执行文件: OK /app/3rd_party/vdego-c2-amvio/amvio (1.04 MiB)
+[2026-09-16 11:41:16] [CHECK] VIO库: OK /app/3rd_party/vdego-c2-amvio/lib/libamvio.so (2.32 MiB)
+[2026-09-16 11:41:16] [CHECK] VIO核心库: OK /app/3rd_party/vdego-c2-amvio/lib/libvioalg.so (5.04 MiB)
+[2026-09-16 11:41:16] [INFO] 输入格式: mp4_split
+[2026-09-16 11:41:16] [INFO] loop_closure: false
+[2026-09-16 11:41:16] [INFO] optimize_iterations: 50
+[2026-09-16 11:41:16] [INFO] gravity_mps2: 9.788300
+[2026-09-16 11:41:16] [INFO] record_log: true
+[2026-09-16 11:41:16] [STAGE] >>> BEGIN 解帧
+[2026-09-16 11:41:16] [INFO] 工作线程: 12
+[2026-09-16 11:41:16] [INFO] 重力: 9.788300
+[2026-09-16 11:41:16] [INFO] 解码产物目录: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/decode_data_message
+[2026-09-16 11:41:18] [CHECK] frame_align.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/decode_data_message/frame_align.csv (186 B)
+[2026-09-16 11:41:18] [INFO] 解帧完成
+[2026-09-16 11:41:18] [INFO] 图像帧: 18000
+[2026-09-16 11:41:18] [INFO] IMU样本: 180001
+[2026-09-16 11:41:18] [INFO] 原始字节合计: 10383299004
+[2026-09-16 11:41:18] [INFO] 定界字节合计: 10383299004
+[2026-09-16 11:41:18] [INFO] file_id=0 raw_bytes=10383299004 mjpg_bytes=10383299004 found_bytes=10383299004 frames=18000 decoded_ok=18000 idx_cached=false
+[2026-09-16 11:41:18] [INFO]   read_ms: 0.000000
+[2026-09-16 11:41:18] [INFO]   decrypt_ms: 0.000000
+[2026-09-16 11:41:18] [INFO]   write_ms: 0.000000
+[2026-09-16 11:41:18] [INFO]   scan_ms: 1216.770490
+[2026-09-16 11:41:18] [INFO]   decode_ms: 0.000000
+[2026-09-16 11:41:18] [INFO]   total_ms: 1216.770490
+[2026-09-16 11:41:18] [INFO]   bytes_ok: true
+[2026-09-16 11:41:18] [INFO] 全部bytes_ok: true
+[2026-09-16 11:41:18] [CHECK] timing.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/decode_data_message/timing.csv (267 B)
+[2026-09-16 11:41:18] [CHECK] imu.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/imu.csv (12.05 MiB)
+[2026-09-16 11:41:18] [CHECK] video_frames_timestamp.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/video_frames_timestamp.csv (461.8 KiB)
+[2026-09-16 11:41:18] [CHECK] timestamps_fixed.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/decode_data_message/timestamps_fixed.csv (818.0 KiB)
+[2026-09-16 11:41:18] [CHECK] frame_align.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/decode_data_message/frame_align.csv (186 B)
+[2026-09-16 11:41:18] [STAGE] <<< END 解帧 (1.59s)
+[2026-09-16 11:41:18] [INFO] 标定已写入: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/calibration.json
+[2026-09-16 11:41:18] [CHECK] calibration.json: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/calibration.json (4.8 KiB)
+[2026-09-16 11:41:18] [STAGE] >>> BEGIN 轨迹计算
+[2026-09-16 11:41:18] [INFO] 模式: 开环
+[2026-09-16 11:41:19] [STAGE] >>> BEGIN VIO
+[2026-09-16 11:41:19] [INFO] 图像帧: 18000
+[2026-09-16 11:41:19] [INFO] IMU样本: 180001
+[2026-09-16 11:41:19] [CHECK] calibration.json: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/calibration.json (4.8 KiB)
+[2026-09-16 11:41:36] [INFO] VIO 推帧 500/18000
+[2026-09-16 11:41:57] [INFO] VIO 推帧 1000/18000
+[2026-09-16 11:42:19] [INFO] VIO 推帧 1500/18000
+[2026-09-16 11:42:36] [INFO] VIO 推帧 2000/18000
+[2026-09-16 11:42:51] [INFO] VIO 推帧 2500/18000
+[2026-09-16 11:43:08] [INFO] VIO 推帧 3000/18000
+[2026-09-16 11:43:25] [INFO] VIO 推帧 3500/18000
+[2026-09-16 11:43:42] [INFO] VIO 推帧 4000/18000
+[2026-09-16 11:43:59] [INFO] VIO 推帧 4500/18000
+[2026-09-16 11:44:18] [INFO] VIO 推帧 5000/18000
+[2026-09-16 11:44:34] [INFO] VIO 推帧 5500/18000
+[2026-09-16 11:44:50] [INFO] VIO 推帧 6000/18000
+[2026-09-16 11:45:06] [INFO] VIO 推帧 6500/18000
+[2026-09-16 11:45:24] [INFO] VIO 推帧 7000/18000
+[2026-09-16 11:45:44] [INFO] VIO 推帧 7500/18000
+[2026-09-16 11:46:01] [INFO] VIO 推帧 8000/18000
+[2026-09-16 11:46:21] [INFO] VIO 推帧 8500/18000
+[2026-09-16 11:46:38] [INFO] VIO 推帧 9000/18000
+[2026-09-16 11:46:55] [INFO] VIO 推帧 9500/18000
+[2026-09-16 11:47:13] [INFO] VIO 推帧 10000/18000
+[2026-09-16 11:47:28] [INFO] VIO 推帧 10500/18000
+[2026-09-16 11:47:45] [INFO] VIO 推帧 11000/18000
+[2026-09-16 11:48:01] [INFO] VIO 推帧 11500/18000
+[2026-09-16 11:48:16] [INFO] VIO 推帧 12000/18000
+[2026-09-16 11:48:32] [INFO] VIO 推帧 12500/18000
+[2026-09-16 11:48:47] [INFO] VIO 推帧 13000/18000
+[2026-09-16 11:49:01] [INFO] VIO 推帧 13500/18000
+[2026-09-16 11:49:16] [INFO] VIO 推帧 14000/18000
+[2026-09-16 11:49:31] [INFO] VIO 推帧 14500/18000
+[2026-09-16 11:49:48] [INFO] VIO 推帧 15000/18000
+[2026-09-16 11:50:03] [INFO] VIO 推帧 15500/18000
+[2026-09-16 11:50:23] [INFO] VIO 推帧 16000/18000
+[2026-09-16 11:50:39] [INFO] VIO 推帧 16500/18000
+[2026-09-16 11:50:56] [INFO] VIO 推帧 17000/18000
+[2026-09-16 11:51:12] [INFO] VIO 推帧 17500/18000
+[2026-09-16 11:51:29] [INFO] VIO 推帧 18000/18000
+[2026-09-16 11:51:30] [STAGE] <<< END VIO (610.87s)
+[2026-09-16 11:51:30] [INFO] 轨迹计算成功
+[2026-09-16 11:51:30] [CHECK] trajectory.csv: OK /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio/trajectory.csv (1.35 MiB)
+[2026-09-16 11:51:30] [STAGE] <<< END 轨迹计算 (611.89s)
+[2026-09-16 11:51:30] [DIR] 最终输出: calibration.json (4.8 KiB)
+[2026-09-16 11:51:30] [DIR] 最终输出: imu.csv (12.05 MiB)
+[2026-09-16 11:51:30] [DIR] 最终输出: run.log (7.4 KiB)
+[2026-09-16 11:51:30] [DIR] 最终输出: trajectory.csv (1.35 MiB)
+[2026-09-16 11:51:30] [DIR] 最终输出: vdego_c2_data_preprocess.log (2.7 KiB)
+[2026-09-16 11:51:30] [DIR] 最终输出: video_duration.txt (20 B)
+[2026-09-16 11:51:30] [DIR] 最终输出: video_frames_timestamp.csv (461.8 KiB)
+[2026-09-16 11:51:30] [STAGE] <<< END 启动 (613.54s)
+[2026-09-16 11:51:30] [INFO] 运行完成
+[2026-09-16 11:51:30] [INFO] 输出目录: /__modal/volumes/vo-GeANHul31XiNToiH7dz9Dz/output/vdego-c2-54d601_2026-09-04_01-17-30_30fps/vio
+[2026-09-16 11:51:30] [INFO] 图像帧: 18000
+[2026-09-16 11:51:30] [INFO] IMU样本: 180001
+[2026-09-16 11:51:30] [INFO] ========== 运行耗时 / 资源 ==========
+[2026-09-16 11:51:30] [INFO] 加载配置: 0.00s, RSS=225 MiB
+[2026-09-16 11:51:30] [INFO] 校验输入目录: 0.10s, RSS=226 MiB, disk=9.68 GiB (输入目录)
+[2026-09-16 11:51:30] [INFO] 加载数据收尾: 0.00s, RSS=226 MiB
+[2026-09-16 11:51:30] [INFO] 解帧: 1.59s, RSS=237 MiB, disk=818.5 KiB (解码产物)
+[2026-09-16 11:51:30] [INFO] 开环VIO: 10m 11.9s, RSS=1184 MiB, disk=13.87 MiB (输出目录(VIO后))
+[2026-09-16 11:51:30] [INFO] 总计: 10m 13.6s
+======================================================================
+ vio 轨迹解算模块日志结束
+======================================================================
+
+✓ Finished downloading files to local!

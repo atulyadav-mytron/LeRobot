@@ -1,0 +1,12 @@
+*.mp4
+*.mcap
+*.task
+
+segments/
+lerobot_dataset/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+overlay_*.png
