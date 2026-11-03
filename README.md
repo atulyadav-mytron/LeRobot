@@ -2,8 +2,39 @@
 
 ## Objective
 
-Convert the VDEGO-C2 stereo egocentric recording into a **LeRobot v3.0**
+Convert the VDEGO-C2 / EgoCapture-1 egocentric recordings into a **LeRobot v3.0**
 dataset.
+
+## Two builders (pick by target schema)
+
+- **`scripts/build_hand_dataset.py`** — the **current target**: a hand-manipulation
+  dataset (`robot_type: human_hand`) matching the `nvwa_2full_episodes` reference
+  exactly. Per-frame 3D hand keypoints + joint rotations (both hands), camera pose,
+  per-frame intrinsics, 640×640 video, a 19-flag quality `frame_masks`, and
+  `window_contract` / `frame_filter` metadata. **Start here.**
+- **`scripts/build_lerobot_dataset.py`** + **`scripts/ingest_egocapture.py`** — an
+  earlier camera-pose/IMU variant (generic v3.0 skeleton). Kept for reference.
+
+### `build_hand_dataset.py` — what it fills vs. what needs upstream data
+
+Fills now (no extra inputs): the 640×640 undistorted pinhole video, the real
+`camera_intrinsics`, all index/timestamp columns, and the complete meta tree
+(info.json, episodes, tasks, subtasks, 20-column frame_masks, train_intervals).
+Task/subtask/scene text is read from each clip's `<stem>.json`.
+
+Typed placeholders until the matching source is supplied:
+
+| Field | Placeholder | Supply via |
+|---|---|---|
+| `hand_{right,left}_cam` [63], `..._rotation` [84] | zeros / identity quats | `--hands-dir` (3D hand-pose pipeline: MediaPipe / HaMeR / WiLoR) |
+| `camera_position` [3], `camera_rotation` [4] | zeros / identity | `--pose-dir` (SLAM trajectory, TUM/CSV) |
+| `frame_masks` quality flags | all-valid, `train_keep=True` | `--quality-dir` (hand-kinematics + VLM validation) |
+| `subtask_index` + subtask vocab | single subtask | `--anno` (segmentation JSON) |
+
+```bash
+pip install numpy pyarrow opencv-python-headless    # + ffmpeg on PATH
+python scripts/build_hand_dataset.py --input /path/to/clips --output /path/to/dataset
+```
 
 ## Inputs
 
