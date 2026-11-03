@@ -95,8 +95,44 @@ python scripts/build_lerobot_dataset.py \
 Useful flags: `--stereo`, `--main-camera {left,right}`, `--no-imu`,
 `--copy-video` (keep HEVC instead of re-encoding), `--subtask-label`.
 
+## Ingesting raw EgoCapture-1 clips
+
+For the `ots-egocentric-inventory` bucket layout (one clip = `<stem>.mp4` fisheye
+video + `<stem>.txt` JSON-Lines IMU + `<stem>.json` metadata + `<stem>.aac`
+audio), use `scripts/ingest_egocapture.py`. It:
+
+- undistorts the 185° fisheye to a **pinhole** view using the Kalibr calibration
+  (same K/D/FOV as the calibration deliverable's `undistort_to_pinhole.py`),
+- converts the `.txt` IMU to `imu.csv` (SI units kept: m/s², rad/s),
+- writes per-frame timestamps from the IMU microsecond clock (IMU is 1:1 with
+  frames at 30 Hz),
+- optionally injects per-clip SLAM poses (`--trajectory-dir`), then
+- runs `build_lerobot_dataset.py` to emit the v3.0 dataset.
+
+```bash
+pip install numpy pandas pyarrow opencv-python-headless   # + ffmpeg on PATH
+
+python scripts/ingest_egocapture.py \
+    --input   /path/to/clips \
+    --staging /path/to/staging \
+    --output  /path/to/lerobot_dataset \
+    --trajectory-dir /path/to/poses      # optional; omit = zero-filled state/action
+```
+
+### Remaining external input: camera poses
+
+The bucket does **not** contain camera trajectories, and they cannot be derived
+from this data alone: the IMU is only 30 Hz (one sample per frame), too low for
+reliable visual-inertial fusion or metric scale. Poses must come from running
+**monocular (or monocular-inertial) SLAM** — e.g. ORB-SLAM3 / COLMAP — on the
+undistorted pinhole video, producing one trajectory file per clip (TUM or CSV)
+for `--trajectory-dir`. Expect **up-to-scale** translation (orientation is still
+good); record metric-vs-up-to-scale in `info.json`. Until poses are supplied,
+`observation.state` / `action` are zero-filled and every other field is complete.
+
 ## Requirements
 
 - Python 3.10+
 - `numpy`, `pandas`, `pyarrow`
+- `opencv-python-headless` (for `ingest_egocapture.py` undistortion)
 - `ffmpeg` / `ffprobe` on `PATH`

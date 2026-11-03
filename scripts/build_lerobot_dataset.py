@@ -502,6 +502,7 @@ def compute_frame_data(folder: Path, ep_idx: int, args):
         "fps": fps,
         "width": width,
         "height": height,
+        "codec_name": info.get("codec_name"),
         "state": state,
         "action": action,
         "imu": imu_arr,
@@ -563,6 +564,9 @@ def write_episode_data(out_root: Path, ep, ep_idx: int, index_offset: int, args)
     if not args.no_imu:
         stats["observation.imu"] = feature_stats(ep["imu"])
 
+    # Final video codec: copied files keep the source codec; re-encodes are h264.
+    out_codec = (ep.get("codec_name") or "h264") if args.copy_video else "h264"
+
     return {
         "episode_index": ep_idx,
         "length": n_frames,
@@ -575,6 +579,7 @@ def write_episode_data(out_root: Path, ep, ep_idx: int, index_offset: int, args)
         "fps": ep["fps"],
         "width": ep["width"],
         "height": ep["height"],
+        "codec": out_codec,
     }
 
 
@@ -697,7 +702,7 @@ def write_info_and_stats(out_root: Path, episodes, args):
     total_videos = sum(len(e["videos"]) for e in episodes)
     fps = episodes[0]["fps"]
     height, width = episodes[0]["height"], episodes[0]["width"]
-    codec = "hevc" if args.copy_video else "h264"
+    codec = episodes[0].get("codec", "h264")
 
     # --- features -------------------------------------------------------
     features = {}
@@ -765,9 +770,9 @@ def write_info_and_stats(out_root: Path, episodes, args):
             "imu_units": "ax, ay, az in m/s^2; gx, gy, gz in rad/s. Nearest-neighbour "
                          "sampled at each video frame time from the higher-rate stream.",
             "video_provenance": (
-                "Re-encoded from HEVC to h264 to match the declared codec."
+                "Re-encoded to h264 to match the declared codec."
                 if not args.copy_video else
-                "Copied as HEVC without re-encoding (--copy-video); declared codec is hevc."
+                f"Copied without re-encoding (--copy-video); declared codec is {codec}."
             ),
             "annotation_defaults": (
                 "subtasks.parquet holds one default subtask; frame_masks flags every "
