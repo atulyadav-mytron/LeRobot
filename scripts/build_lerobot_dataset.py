@@ -1,66 +1,82 @@
 #!/usr/bin/env python3
 """
-Convert a converted vdego-c2 stereo capture into a LeRobot v2.1 dataset,
-matching the structure of the supplied reference zip (lerobot_dataset.zip).
+Convert a converted vdego-c2 stereo egocentric capture into a LeRobot v3.0
+dataset, laid out exactly as the target structure:
 
-WHAT THE REFERENCE LOOKS LIKE, AND WHERE THIS DEPARTS FROM IT
---------------------------------------------------------------
-The reference is a MONOCULAR egocentric dataset: one camera key
-(observation.images.cam_egocentric), one episode, 5400 frames, with
-observation.state and action both 6-DoF [tx,ty,tz,rx,ry,rz] filled
-entirely with ZEROS. Its own CAMERA_PARAMETERS doc marks the intrinsics
-and extrinsics "SAMPLE *  replace with calibrated values before final
-submission", and says to run COLMAP or ORB-SLAM3 for per-frame poses.
+    dataset_root/
+    |-- data/chunk-000/
+    |   |-- file-000.parquet                      # episode 0, per-frame rows
+    |   `-- file-001.parquet                      # episode 1, per-frame rows
+    |-- meta/
+    |   |-- info.json                             # format, fps, path templates
+    |   |-- episodes/chunk-000/file-000.parquet   # one location record per episode
+    |   |-- tasks.parquet                         # task vocabulary
+    |   |-- subtasks.parquet                      # action-stage vocabulary
+    |   |-- frame_masks/part-00000.parquet        # per-frame validity flags
+    |   |-- train_intervals/part-00000.parquet    # contiguous valid intervals
+    |   `-- stats.json                            # aggregate feature statistics
+    `-- videos/observation.images.main/chunk-000/
+        |-- file-000.mp4
+        `-- file-001.mp4
 
-This capture has more than the reference could express, so three
-deliberate departures, each recorded in meta/info.json under
-"_mytron_notes":
+WHAT CHANGED FROM THE OLD v2.1 SCRIPT
+-------------------------------------
+This replaces the previous v2.1 output. The v2.1 version wrote
+episode_{i:06d}.parquet, episodes.jsonl and tasks.jsonl, with the chunk
+folder ahead of the camera key in the video path. v3.0 differs on every
+path and moves the per-episode and task metadata into parquet:
 
-  1. TWO camera keys (cam_left, cam_right) instead of one. The capture is
-     stereo; collapsing it to one key would discard a camera.
-  2. REAL state/action from trajectory.csv instead of zero placeholders.
-     state = VIO pose at frame t, action = pose at frame t+1 (the usual
-     next-state-as-action convention for passive human recordings; a human
-     wearing a headset issues no commanded action). The final frame's
-     action repeats its own state, since there is no t+1.
-  3. observation.imu added as an extra 6-element feature. The reference
-     has no IMU slot; extra observation keys are common in LeRobot
-     datasets and readers ignore keys they do not know.
+  * data file names are file-{file_index:03d}.parquet, one episode per file.
+  * video path is videos/{video_key}/chunk-xxx/file-xxx.mp4 (key first).
+  * meta/episodes/... is parquet, one row per episode, each row pointing at
+    the data file + global row range and the video file + time range.
+  * meta/tasks.parquet / meta/subtasks.parquet replace the .jsonl files.
+  * info.json declares codebase_version v3.0, data_files_size_in_mb and
+    video_files_size_in_mb, and the v3.0 path templates.
 
-Everything else follows the reference exactly: file layout, info.json key
-order and feature block shape, episodes.jsonl / tasks.jsonl line format,
-camera.json (MTX / DIST / hand_eye), h264 + yuv420p video, chunks_size
-1000, and the same parquet column set and dtypes.
+CAMERA KEY
+----------
+The target has a single camera key, observation.images.main. The capture is
+stereo, so by default the LEFT camera becomes "main" (--main-camera right to
+flip). Pass --stereo to additionally emit the other camera as
+observation.images.second; the default keeps the single-key layout shown
+above. Whichever camera is dropped is recorded in info.json _notes.
 
-ROTATION CONVENTION
--------------------
-The reference names the last three components rx, ry, rz without saying
-what they are. trajectory.csv stores orientation as a quaternion, so this
-script converts to an AXIS-ANGLE rotation vector (the rotation axis scaled
-by the angle in radians) -- the same thing OpenCV's rvec and scipy's
-as_rotvec produce. This is recorded explicitly in info.json rather than
-left implicit, because Euler angles would also fit the name "rx,ry,rz"
-and would be a different quantity.
+THE THREE ANNOTATION TABLES
+---------------------------
+subtasks.parquet, frame_masks and train_intervals describe annotations the
+raw capture does not carry (action-stage labels, per-frame validity, training
+windows). They are written with explicit, documented defaults so the dataset
+is structurally complete and immediately loadable, and so real annotations
+can be dropped in later without changing the layout:
 
-VIDEO RE-ENCODE
----------------
-The converted capture is HEVC (hevc_nvenc, hvc1). The reference declares
-h264 / yuv420p, so videos are re-encoded to h264. That is a second lossy
-generation on top of the crop; CRF 18 keeps it visually near-transparent,
-but note it in any delivery. --copy-video skips the re-encode if you would
-rather keep HEVC and edit the declared codec yourself.
+  * subtasks.parquet  -- a single subtask (--subtask-label) covering the whole
+    recording. Replace with a real action-stage vocabulary when available.
+  * frame_masks       -- every frame flagged valid=True. Edit flags to False
+    to exclude frames (e.g. blur, occlusion, out-of-task).
+  * train_intervals   -- derived from frame_masks as the maximal contiguous
+    runs of valid frames. With the all-valid default that is one interval per
+    episode; re-running after editing frame_masks recomputes the intervals.
+
+ROTATION / STATE / ACTION / IMU
+-------------------------------
+Unchanged from the capture semantics: observation.state is the per-frame VIO
+pose [tx,ty,tz, rx,ry,rz] with rx,ry,rz an AXIS-ANGLE rotation vector in
+radians (cv2 rvec convention, converted from the trajectory quaternion -- NOT
+Euler angles); action is the next frame's state (last frame repeats its own);
+observation.imu is [ax,ay,az, gx,gy,gz] nearest-neighbour sampled at each
+frame time. Units: metres, radians, m/s^2, rad/s.
 
 USAGE
 -----
     python build_lerobot_dataset.py \\
-        --input  "Z:\\MytronLabs Internship\\Stereo_1080p" \\
-        --output "Z:\\MytronLabs Internship\\lerobot_dataset" \\
-        --task-name factory_worker_activity \\
-        --task-description "Egocentric video of factory worker performing activities."
+        --input  "/path/to/Stereo_1080p" \\
+        --output "/path/to/lerobot_dataset" \\
+        --task-label "factory worker activity recording"
 
 The script auto-detects column names in trajectory.csv / imu.csv /
-video_frames_timestamp.csv and prints what it matched. If it cannot find a
-required column it stops and prints the actual header, rather than guessing.
+video_frames_timestamp.csv and prints what it matched. If a required column
+is missing it stops and prints the actual header rather than guessing.
 """
 
 import argparse
@@ -85,9 +101,19 @@ try:
 except ImportError:
     sys.exit("pyarrow is required:  pip install pyarrow")
 
+# --- v3.0 layout constants (match huggingface/lerobot defaults) -------------
 FOOTER_MARKER = "Finished downloading"
 CHUNKS_SIZE = 1000
-CAMERA_KEYS = {"cam_left": "cam_left.mp4", "cam_right": "cam_right.mp4"}
+DATA_FILE_SIZE_IN_MB = 100
+VIDEO_FILE_SIZE_IN_MB = 200
+
+DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+EPISODES_PATH = "meta/episodes/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+
+MAIN_KEY = "observation.images.main"
+SECOND_KEY = "observation.images.second"
+CAMERA_SOURCES = {"left": "cam_left.mp4", "right": "cam_right.mp4"}
 
 WARNINGS: list[str] = []
 
@@ -132,13 +158,7 @@ def _norm(name: str) -> str:
 
 
 def pick_column(df: pd.DataFrame, candidates, required=True, label=""):
-    """Find a column by name, tolerating separators and unit suffixes.
-
-    Two passes: exact normalised match first, then a prefix match so a column
-    carrying its units ('accel_x(m/s^2)') still matches the bare name
-    ('accel_x'). Prefix matches are announced, because a wrong one would be
-    silently wrong data rather than a crash.
-    """
+    """Find a column by name, tolerating separators and unit suffixes."""
     norm = {_norm(c): c for c in df.columns}
 
     for cand in candidates:
@@ -300,13 +320,7 @@ def load_imu(folder: Path) -> pd.DataFrame | None:
 
 
 def resample_to_frames(src: pd.DataFrame, value_cols, frame_ts: np.ndarray, n_frames: int):
-    """Nearest-neighbour sample of a high-rate stream at each frame time.
-
-    The IMU runs far faster than 30 fps and the VIO stream at its own rate, so
-    each frame takes the reading closest in time. Nearest-neighbour rather than
-    interpolation: interpolating a quaternion componentwise is wrong, and
-    interpolated IMU samples would be readings that were never measured.
-    """
+    """Nearest-neighbour sample of a high-rate stream at each frame time."""
     out = np.zeros((n_frames, len(value_cols)), dtype=np.float64)
     if src is None or len(src) == 0:
         return out, None
@@ -332,17 +346,67 @@ def resample_to_frames(src: pd.DataFrame, value_cols, frame_ts: np.ndarray, n_fr
     return out, gap_ns
 
 
+# -------------------------------------------------------------- statistics
+
+def feature_stats(arr: np.ndarray) -> dict:
+    """Per-dimension mean/std/min/max + a scalar count for a (n, d) array."""
+    a = np.asarray(arr, dtype=np.float64)
+    if a.ndim == 1:
+        a = a.reshape(-1, 1)
+    return {
+        "mean": a.mean(axis=0).tolist(),
+        "std": a.std(axis=0).tolist(),
+        "min": a.min(axis=0).tolist(),
+        "max": a.max(axis=0).tolist(),
+        "count": [int(a.shape[0])],
+    }
+
+
+class RunningStats:
+    """Accumulates mean/std/min/max across episodes without keeping all frames."""
+
+    def __init__(self, dim: int):
+        self.dim = dim
+        self.n = 0
+        self.sum = np.zeros(dim, dtype=np.float64)
+        self.sumsq = np.zeros(dim, dtype=np.float64)
+        self.min = np.full(dim, np.inf)
+        self.max = np.full(dim, -np.inf)
+
+    def update(self, arr: np.ndarray):
+        a = np.asarray(arr, dtype=np.float64).reshape(-1, self.dim)
+        self.n += a.shape[0]
+        self.sum += a.sum(axis=0)
+        self.sumsq += (a * a).sum(axis=0)
+        self.min = np.minimum(self.min, a.min(axis=0))
+        self.max = np.maximum(self.max, a.max(axis=0))
+
+    def result(self) -> dict:
+        if self.n == 0:
+            return {"mean": [0.0] * self.dim, "std": [0.0] * self.dim,
+                    "min": [0.0] * self.dim, "max": [0.0] * self.dim, "count": [0]}
+        mean = self.sum / self.n
+        var = np.maximum(self.sumsq / self.n - mean * mean, 0.0)
+        return {
+            "mean": mean.tolist(),
+            "std": np.sqrt(var).tolist(),
+            "min": self.min.tolist(),
+            "max": self.max.tolist(),
+            "count": [int(self.n)],
+        }
+
+
 # ------------------------------------------------------------------ video
 
 def convert_video(src: Path, dst: Path, copy_video: bool):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if copy_video:
         shutil.copy2(src, dst)
-        print(f"    copied {src.name} -> {dst.relative_to(dst.parents[3])}")
+        print(f"    copied {src.name} -> {dst.name}")
         return
 
-    # The reference declares h264 / yuv420p. The source is HEVC, so this is a
-    # real re-encode -- a second lossy generation after the crop.
+    # The source is HEVC; re-encode to h264 (a second lossy generation after
+    # the resolution crop). CRF 18 keeps it visually near-transparent.
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(src),
@@ -354,33 +418,44 @@ def convert_video(src: Path, dst: Path, copy_video: bool):
     subprocess.run(cmd, check=True)
 
 
-# ------------------------------------------------------------------- build
+# ------------------------------------------------------------ episode build
 
-def build_episode(folder: Path, ep_idx: int, out_root: Path, args, index_offset: int):
-    left_video = folder / "cam_left.mp4"
-    if not left_video.exists():
+def compute_frame_data(folder: Path, ep_idx: int, args):
+    """Load per-frame state/action/imu/timestamps for one episode folder.
+
+    Returns a dict of arrays plus video metadata, or None if the episode has
+    no main-camera video. Does not write anything.
+    """
+    main_src = folder / CAMERA_SOURCES[args.main_camera]
+    if not main_src.exists():
         return None
 
     print(f"\n--- episode {ep_idx:06d}  <-  {folder} ---")
 
-    info = ffprobe(left_video)
+    info = ffprobe(main_src)
     width, height = int(info["width"]), int(info["height"])
     fps = fps_of(info)
     n_frames = int(info["nb_frames"]) if info.get("nb_frames") else None
     if not n_frames:
-        sys.exit(f"{left_video}: ffprobe reported no frame count.")
+        sys.exit(f"{main_src}: ffprobe reported no frame count.")
     print(f"  video: {width}x{height} @ {fps:g} fps, {n_frames} frames, "
           f"codec {info.get('codec_name')}")
 
-    # Right camera must have the same frame count or the two streams desync.
-    right_video = folder / "cam_right.mp4"
-    if right_video.exists():
-        r = ffprobe(right_video)
-        if int(r["nb_frames"]) != n_frames:
-            warn(f"{folder.name}: cam_right has {r['nb_frames']} frames vs "
-                 f"cam_left {n_frames}. They will not stay in sync.")
+    # Second camera (if --stereo) must share the frame count or the streams desync.
+    second_name = CAMERA_SOURCES["right" if args.main_camera == "left" else "left"]
+    second_src = folder / second_name
+    if args.stereo:
+        if second_src.exists():
+            r = ffprobe(second_src)
+            if int(r["nb_frames"]) != n_frames:
+                warn(f"{folder.name}: second camera has {r['nb_frames']} frames vs "
+                     f"main {n_frames}. They will not stay in sync.")
+        else:
+            warn(f"{folder.name}: --stereo set but {second_name} is missing; "
+                 "this episode is main-only.")
+            second_src = None
     else:
-        warn(f"{folder.name}: no cam_right.mp4; this episode is left-only.")
+        second_src = None
 
     frame_ts = load_timestamps(folder, n_frames)
     traj = load_trajectory(folder)
@@ -421,122 +496,310 @@ def build_episode(folder: Path, ep_idx: int, out_root: Path, args, index_offset:
     else:
         timestamps = np.arange(n_frames) / fps
 
-    # --- parquet --------------------------------------------------------
-    chunk = ep_idx // CHUNKS_SIZE
-    table = pa.table({
-        "timestamp": pa.array(timestamps, type=pa.float32()),
+    return {
+        "folder": folder,
+        "n_frames": n_frames,
+        "fps": fps,
+        "width": width,
+        "height": height,
+        "state": state,
+        "action": action,
+        "imu": imu_arr,
+        "timestamps": timestamps.astype(np.float64),
+        "main_src": main_src,
+        "second_src": second_src,
+        "traj": traj,
+    }
+
+
+def write_episode_data(out_root: Path, ep, ep_idx: int, index_offset: int, args):
+    """Write one episode's per-frame parquet and video(s); return its record."""
+    n_frames = ep["n_frames"]
+    chunk_index = ep_idx // CHUNKS_SIZE
+    file_index = ep_idx % CHUNKS_SIZE
+    from_index = index_offset
+    to_index = index_offset + n_frames
+
+    columns = {
+        "timestamp": pa.array(ep["timestamps"], type=pa.float32()),
         "frame_index": pa.array(np.arange(n_frames), type=pa.int64()),
         "episode_index": pa.array(np.full(n_frames, ep_idx), type=pa.int64()),
-        "index": pa.array(np.arange(index_offset, index_offset + n_frames),
-                          type=pa.int64()),
-        "task_index": pa.array(np.zeros(n_frames), type=pa.int64()),
-        "next.done": pa.array([i == n_frames - 1 for i in range(n_frames)],
-                              type=pa.bool_()),
-        "observation.state": pa.array(state.tolist(), type=pa.list_(pa.float64())),
-        "action": pa.array(action.tolist(), type=pa.list_(pa.float64())),
-        "observation.imu": pa.array(imu_arr.tolist(), type=pa.list_(pa.float64())),
-    })
-    if args.no_imu:
-        table = table.drop_columns(["observation.imu"])
+        "index": pa.array(np.arange(from_index, to_index), type=pa.int64()),
+        "task_index": pa.array(np.zeros(n_frames, dtype=np.int64), type=pa.int64()),
+        "subtask_index": pa.array(np.zeros(n_frames, dtype=np.int64), type=pa.int64()),
+        "next.done": pa.array([i == n_frames - 1 for i in range(n_frames)], type=pa.bool_()),
+        "observation.state": pa.array(ep["state"].tolist(), type=pa.list_(pa.float32())),
+        "action": pa.array(ep["action"].tolist(), type=pa.list_(pa.float32())),
+    }
+    if not args.no_imu:
+        columns["observation.imu"] = pa.array(ep["imu"].tolist(), type=pa.list_(pa.float32()))
 
-    data_path = out_root / f"data/chunk-{chunk:03d}/episode_{ep_idx:06d}.parquet"
+    data_rel = DATA_PATH.format(chunk_index=chunk_index, file_index=file_index)
+    data_path = out_root / data_rel
     data_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, data_path)
-    print(f"  wrote {data_path.relative_to(out_root)}  ({n_frames} rows)")
+    pq.write_table(pa.table(columns), data_path)
+    print(f"  wrote {data_rel}  ({n_frames} rows)")
 
-    # --- videos ---------------------------------------------------------
-    videos_map = {}
-    for key, fname in CAMERA_KEYS.items():
-        src = folder / fname
-        if not src.exists():
-            continue
-        rel = f"videos/chunk-{chunk:03d}/observation.images.{key}/episode_{ep_idx:06d}.mp4"
-        convert_video(src, out_root / rel, args.copy_video)
-        videos_map[f"observation.images.{key}"] = rel
+    # --- video(s) -------------------------------------------------------
+    duration = float(ep["timestamps"][-1]) if n_frames else 0.0
+    videos = {}
+    main_rel = VIDEO_PATH.format(video_key=MAIN_KEY, chunk_index=chunk_index,
+                                 file_index=file_index)
+    convert_video(ep["main_src"], out_root / main_rel, args.copy_video)
+    videos[MAIN_KEY] = {"chunk_index": chunk_index, "file_index": file_index,
+                        "from_timestamp": 0.0, "to_timestamp": duration}
+    if ep["second_src"] is not None:
+        second_rel = VIDEO_PATH.format(video_key=SECOND_KEY, chunk_index=chunk_index,
+                                       file_index=file_index)
+        convert_video(ep["second_src"], out_root / second_rel, args.copy_video)
+        videos[SECOND_KEY] = {"chunk_index": chunk_index, "file_index": file_index,
+                              "from_timestamp": 0.0, "to_timestamp": duration}
 
-    # --- camera parameters ----------------------------------------------
-    cam_params = build_camera_entry(folder, width, height, traj)
+    # --- per-episode stats ----------------------------------------------
+    stats = {
+        "observation.state": feature_stats(ep["state"]),
+        "action": feature_stats(ep["action"]),
+    }
+    if not args.no_imu:
+        stats["observation.imu"] = feature_stats(ep["imu"])
 
     return {
         "episode_index": ep_idx,
         "length": n_frames,
-        "videos": videos_map,
-        "fps": fps,
-        "width": width,
-        "height": height,
-        "camera": cam_params,
-        "n_frames": n_frames,
+        "data/chunk_index": chunk_index,
+        "data/file_index": file_index,
+        "dataset_from_index": from_index,
+        "dataset_to_index": to_index,
+        "videos": videos,
+        "stats": stats,
+        "fps": ep["fps"],
+        "width": ep["width"],
+        "height": ep["height"],
     }
 
 
-def build_camera_entry(folder: Path, width: int, height: int, traj):
-    """camera.json entry: real calibrated MTX where available, plus frame-0 pose."""
-    mcap = folder / "mcap_files"
-    entry = {"camera_ids": {}, "camera_parameters": {}, "hand_eye": {}}
-    res_key = f"{height}P"
+# -------------------------------------------------------------- meta tables
 
-    for key, side in (("cam_left", "left"), ("cam_right", "right")):
-        if not (folder / CAMERA_KEYS[key]).exists():
+def write_episodes_table(out_root: Path, episodes, args):
+    """meta/episodes/chunk-000/file-000.parquet -- one location record per episode."""
+    video_keys = sorted({k for e in episodes for k in e["videos"]})
+    feat_keys = sorted({k for e in episodes for k in e["stats"]})
+
+    cols: dict[str, list] = {
+        "episode_index": [e["episode_index"] for e in episodes],
+        "tasks": [[args.task_label] for _ in episodes],
+        "length": [e["length"] for e in episodes],
+        "data/chunk_index": [e["data/chunk_index"] for e in episodes],
+        "data/file_index": [e["data/file_index"] for e in episodes],
+        "dataset_from_index": [e["dataset_from_index"] for e in episodes],
+        "dataset_to_index": [e["dataset_to_index"] for e in episodes],
+        # every episode record lives in this single meta file
+        "meta/episodes/chunk_index": [0 for _ in episodes],
+        "meta/episodes/file_index": [0 for _ in episodes],
+    }
+    for vk in video_keys:
+        cols[f"videos/{vk}/chunk_index"] = [e["videos"].get(vk, {}).get("chunk_index") for e in episodes]
+        cols[f"videos/{vk}/file_index"] = [e["videos"].get(vk, {}).get("file_index") for e in episodes]
+        cols[f"videos/{vk}/from_timestamp"] = [e["videos"].get(vk, {}).get("from_timestamp") for e in episodes]
+        cols[f"videos/{vk}/to_timestamp"] = [e["videos"].get(vk, {}).get("to_timestamp") for e in episodes]
+    for fk in feat_keys:
+        for stat in ("mean", "std", "min", "max", "count"):
+            cols[f"stats/{fk}/{stat}"] = [e["stats"].get(fk, {}).get(stat) for e in episodes]
+
+    rel = EPISODES_PATH.format(chunk_index=0, file_index=0)
+    path = out_root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table(cols), path)
+    print(f"  wrote {rel}  ({len(episodes)} episode records)")
+
+
+def write_vocab_table(path: Path, index_name: str, index_col: str, items: list[str]):
+    """Write a {task,subtask}.parquet: string index + integer index column."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame({index_col: list(range(len(items)))},
+                      index=pd.Index(items, name=index_name))
+    df.to_parquet(path)
+    print(f"  wrote {path.relative_to(path.parents[1])}  ({len(items)} rows)")
+
+
+def write_frame_masks(out_root: Path, episodes):
+    """meta/frame_masks/part-00000.parquet -- per-frame validity, all True by default."""
+    total = sum(e["length"] for e in episodes)
+    idx = np.arange(total, dtype=np.int64)
+    ep_index = np.concatenate([np.full(e["length"], e["episode_index"], dtype=np.int64)
+                               for e in episodes]) if episodes else np.array([], np.int64)
+    frame_index = np.concatenate([np.arange(e["length"], dtype=np.int64)
+                                  for e in episodes]) if episodes else np.array([], np.int64)
+    table = pa.table({
+        "index": pa.array(idx, type=pa.int64()),
+        "episode_index": pa.array(ep_index, type=pa.int64()),
+        "frame_index": pa.array(frame_index, type=pa.int64()),
+        "valid": pa.array(np.ones(total, dtype=bool), type=pa.bool_()),
+    })
+    rel = "meta/frame_masks/part-00000.parquet"
+    path = out_root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+    print(f"  wrote {rel}  ({total} frames, all valid)")
+    return np.ones(total, dtype=bool), ep_index, idx
+
+
+def write_train_intervals(out_root: Path, valid: np.ndarray, ep_index: np.ndarray,
+                          global_index: np.ndarray):
+    """meta/train_intervals/part-00000.parquet -- maximal contiguous valid runs.
+
+    Derived from the frame_masks validity flags: within each episode, every
+    maximal run of valid==True frames becomes one [start, end) interval over
+    global frame indices. With the all-valid default this is one interval per
+    episode; edit frame_masks and re-run to split them.
+    """
+    rows = {"interval_index": [], "episode_index": [],
+            "start_index": [], "end_index": [], "length": []}
+    k = 0
+    n = len(valid)
+    i = 0
+    while i < n:
+        if not valid[i]:
+            i += 1
             continue
-        entry["camera_ids"][key] = f"{folder.name}-{side}"
+        ep = ep_index[i]
+        j = i
+        while j < n and valid[j] and ep_index[j] == ep:
+            j += 1
+        rows["interval_index"].append(k)
+        rows["episode_index"].append(int(ep))
+        rows["start_index"].append(int(global_index[i]))
+        rows["end_index"].append(int(global_index[j - 1]) + 1)
+        rows["length"].append(int(j - i))
+        k += 1
+        i = j
 
-        f_intr = mcap / f"{side}_rectified_intrinsics.json"
-        if f_intr.exists():
-            d = read_json_stripped(f_intr)
-            K = d["K"]
-            fx, fy, cx, cy = K[0][0], K[1][1], K[0][2], K[1][2]
-            undistorted = all(abs(float(x)) < 1e-9 for x in d.get("D", [0, 0, 0, 0]))
-            if int(d.get("image_height", height)) != height:
-                warn(f"{folder.name}/{side}: intrinsics declare "
-                     f"{d.get('image_width')}x{d.get('image_height')} but the video is "
-                     f"{width}x{height} -- camera.json would describe the wrong pixels.")
-        else:
-            warn(f"{folder.name}/{side}: no rectified intrinsics found; "
-                 "camera.json falls back to a nominal pinhole guess.")
-            fx = fy = float(width) * 0.55
-            cx, cy = width / 2.0, height / 2.0
-            undistorted = True
+    table = pa.table({
+        "interval_index": pa.array(rows["interval_index"], type=pa.int64()),
+        "episode_index": pa.array(rows["episode_index"], type=pa.int64()),
+        "start_index": pa.array(rows["start_index"], type=pa.int64()),
+        "end_index": pa.array(rows["end_index"], type=pa.int64()),
+        "length": pa.array(rows["length"], type=pa.int64()),
+    })
+    rel = "meta/train_intervals/part-00000.parquet"
+    path = out_root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+    print(f"  wrote {rel}  ({k} interval(s))")
 
-        entry["camera_parameters"][key] = {
-            res_key: {
-                "MTX": [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]],
-                "DIST": [0.0, 0.0, 0.0, 0.0, 0.0],
-                "DIST_MODEL": "radial-tangential",
-                "DIST_ORDER": ["k1", "k2", "p1", "p2", "k3"],
-                "image_width": width,
-                "image_height": height,
-                "fx": fx, "fy": fy, "cx": cx, "cy": cy,
-                "undistorted": bool(undistorted),
-            }
+
+def write_info_and_stats(out_root: Path, episodes, args):
+    meta = out_root / "meta"
+    meta.mkdir(parents=True, exist_ok=True)
+
+    total_frames = sum(e["length"] for e in episodes)
+    video_keys = sorted({k for e in episodes for k in e["videos"]})
+    total_videos = sum(len(e["videos"]) for e in episodes)
+    fps = episodes[0]["fps"]
+    height, width = episodes[0]["height"], episodes[0]["width"]
+    codec = "hevc" if args.copy_video else "h264"
+
+    # --- features -------------------------------------------------------
+    features = {}
+    for vk in video_keys:
+        features[vk] = {
+            "dtype": "video",
+            "shape": [height, width, 3],
+            "names": ["height", "width", "channel"],
+            "video_info": {
+                "video.fps": float(fps),
+                "video.codec": codec,
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": False,
+                "has_audio": False,
+            },
         }
+    pose_names = ["tx", "ty", "tz", "rx", "ry", "rz"]
+    features["observation.state"] = {"dtype": "float32", "shape": [6], "names": pose_names}
+    features["action"] = {"dtype": "float32", "shape": [6], "names": pose_names}
+    if not args.no_imu:
+        features["observation.imu"] = {
+            "dtype": "float32", "shape": [6],
+            "names": ["ax", "ay", "az", "gx", "gy", "gz"],
+        }
+    for name, dtype in (("timestamp", "float32"), ("frame_index", "int64"),
+                        ("episode_index", "int64"), ("index", "int64"),
+                        ("task_index", "int64"), ("subtask_index", "int64")):
+        features[name] = {"dtype": dtype, "shape": [1], "names": None}
+    features["next.done"] = {"dtype": "bool", "shape": [1], "names": None}
 
-    # hand_eye: real frame-0 VIO pose instead of the reference's identity
-    # placeholder. Per-frame poses live in the parquet's observation.state.
-    if traj is not None and len(traj):
-        r0 = traj.iloc[0]
-        R = quat_to_R(r0["qx"], r0["qy"], r0["qz"], r0["qw"])
-        T = [float(r0["px"]), float(r0["py"]), float(r0["pz"])]
-        note = ("Frame-0 VIO pose from trajectory.csv. Per-frame poses are in the "
-                "parquet observation.state column, not repeated here.")
-    else:
-        R = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-        T = [0.0, 0.0, 0.0]
-        note = "No trajectory.csv available; identity placeholder."
-
-    entry["hand_eye"]["cam_left_in_world"] = {
-        "note": note,
-        "R": R,
-        "T": T,
-        "T_4x4": [R[0] + [T[0]], R[1] + [T[1]], R[2] + [T[2]], [0.0, 0.0, 0.0, 1.0]],
-        "convention": "camera_to_world",
-        "convention_note": (
-            "trajectory.csv stores the camera/IMU pose IN the world frame, so this is "
-            "camera_to_world. The reference zip declared world_to_camera for an "
-            "identity placeholder, where the two are indistinguishable. Invert if a "
-            "consumer expects world_to_camera."
-        ),
+    dropped = "right" if args.main_camera == "left" else "left"
+    info = {
+        "codebase_version": "v3.0",
+        "robot_type": args.robot_type,
+        "total_episodes": len(episodes),
+        "total_frames": total_frames,
+        "total_tasks": 1,
+        "total_videos": total_videos,
+        "chunks_size": CHUNKS_SIZE,
+        "data_files_size_in_mb": DATA_FILE_SIZE_IN_MB,
+        "video_files_size_in_mb": VIDEO_FILE_SIZE_IN_MB,
+        "fps": int(round(fps)),
+        "splits": {"train": f"0:{len(episodes)}"},
+        "data_path": DATA_PATH,
+        "video_path": VIDEO_PATH,
+        "features": features,
+        "_notes": {
+            "source": "vdego-c2 stereo egocentric capture, cropped 1920x1200 -> 1920x1080",
+            "camera": (
+                f"observation.images.main = {args.main_camera} camera."
+                + ("" if args.stereo else
+                   f" The {dropped} camera is not carried; re-run with --stereo to add "
+                   "it as observation.images.second.")
+            ),
+            "rotation_convention": (
+                "rx, ry, rz are an AXIS-ANGLE rotation vector in radians (axis scaled by "
+                "angle), converted from the trajectory quaternion -- the cv2 rvec "
+                "convention. They are NOT Euler angles."
+            ),
+            "state_action": (
+                "observation.state = per-frame VIO pose; action = next frame's state; "
+                "the final frame's action repeats its own state."
+            ),
+            "state_units": "tx, ty, tz in metres; rx, ry, rz in radians.",
+            "imu_units": "ax, ay, az in m/s^2; gx, gy, gz in rad/s. Nearest-neighbour "
+                         "sampled at each video frame time from the higher-rate stream.",
+            "video_provenance": (
+                "Re-encoded from HEVC to h264 to match the declared codec."
+                if not args.copy_video else
+                "Copied as HEVC without re-encoding (--copy-video); declared codec is hevc."
+            ),
+            "annotation_defaults": (
+                "subtasks.parquet holds one default subtask; frame_masks flags every "
+                "frame valid=True; train_intervals are the contiguous valid runs (one "
+                "per episode under the default). Replace these with real annotations as "
+                "they become available -- the layout does not change."
+            ),
+        },
     }
-    return entry
+    (meta / "info.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+
+    # --- aggregate stats.json ------------------------------------------
+    running = {"observation.state": RunningStats(6), "action": RunningStats(6)}
+    if not args.no_imu:
+        running["observation.imu"] = RunningStats(6)
+    for e in episodes:
+        for k, rs in running.items():
+            s = e["stats"][k]
+            # reconstruct per-episode sums from its stats to feed the aggregate
+            # (cheaper path: we kept the arrays? no -- recombine from mean/count)
+            cnt = s["count"][0]
+            mean = np.array(s["mean"])
+            # min/max combine directly; mean/std via count-weighting
+            rs.n += cnt
+            rs.sum += mean * cnt
+            rs.sumsq += (np.array(s["std"]) ** 2 + mean ** 2) * cnt
+            rs.min = np.minimum(rs.min, np.array(s["min"]))
+            rs.max = np.maximum(rs.max, np.array(s["max"]))
+    stats_json = {k: rs.result() for k, rs in running.items()}
+    (meta / "stats.json").write_text(json.dumps(stats_json, indent=2) + "\n", encoding="utf-8")
+
+    print("  wrote meta/info.json, meta/stats.json")
 
 
 # -------------------------------------------------------------------- main
@@ -547,19 +810,20 @@ def main():
     )
     ap.add_argument("--input", required=True, help="Converted 1080p capture root")
     ap.add_argument("--output", required=True, help="LeRobot dataset root to create")
-    ap.add_argument("--task-name", default="factory_worker_activity")
     ap.add_argument("--task-label", default="factory worker activity recording",
-                    help="The string that appears in episodes.jsonl 'tasks'")
-    ap.add_argument("--task-category", default="industrial_egocentric")
-    ap.add_argument("--task-description",
-                    default="Egocentric video of a worker performing activities.")
+                    help="The task string stored in tasks.parquet and each episode record")
+    ap.add_argument("--task-name", default="factory_worker_activity")
+    ap.add_argument("--subtask-label", default="full_episode",
+                    help="The single default subtask written to subtasks.parquet")
     ap.add_argument("--robot-type", default="egocentric_camera")
+    ap.add_argument("--main-camera", choices=["left", "right"], default="left",
+                    help="Which source camera becomes observation.images.main")
+    ap.add_argument("--stereo", action="store_true",
+                    help="Also emit the other camera as observation.images.second")
     ap.add_argument("--copy-video", action="store_true",
-                    help="Copy videos as-is (HEVC) instead of re-encoding to h264. "
-                         "The reference declares h264, so this leaves info.json "
-                         "describing a codec the files do not use unless you edit it.")
+                    help="Copy videos as-is (HEVC) instead of re-encoding to h264.")
     ap.add_argument("--no-imu", action="store_true",
-                    help="Omit observation.imu, matching the reference feature set exactly.")
+                    help="Omit observation.imu from the dataset.")
     ap.add_argument("--include-root", action="store_true",
                     help="Also make an episode from the capture root (raw fisheye); "
                          "by default only segments/ are used.")
@@ -572,154 +836,51 @@ def main():
     if out.exists() and any(out.iterdir()):
         sys.exit(f"Output directory is not empty: {out}\nRemove it or pick another path.")
 
+    main_name = CAMERA_SOURCES[args.main_camera]
     folders = []
-    if args.include_root and (src / "cam_left.mp4").exists():
+    if args.include_root and (src / main_name).exists():
         folders.append(src)
         warn("Including the capture root as an episode. Those videos are the raw "
              "fisheye pair, not the rectified segments -- their geometry differs from "
-             "the pinhole intrinsics written into camera.json.")
+             "the pinhole intrinsics.")
     seg = src / "segments"
     if seg.is_dir():
         folders.extend(sorted(d for d in seg.iterdir() if d.is_dir()))
     if not folders:
-        sys.exit(f"No cam_left.mp4 found under {src}")
+        sys.exit(f"No {main_name} found under {src}")
 
     out.mkdir(parents=True, exist_ok=True)
 
     episodes = []
     index_offset = 0
     for ep_idx, folder in enumerate(folders):
-        ep = build_episode(folder, ep_idx, out, args, index_offset)
-        if ep:
-            episodes.append(ep)
-            index_offset += ep["n_frames"]
+        ep = compute_frame_data(folder, ep_idx, args)
+        if ep is None:
+            continue
+        record = write_episode_data(out, ep, ep_idx, index_offset, args)
+        episodes.append(record)
+        index_offset += record["length"]
 
     if not episodes:
         sys.exit("No episodes were built.")
 
-    write_metadata(out, episodes, args)
+    # --- metadata -------------------------------------------------------
+    write_episodes_table(out, episodes, args)
+    write_vocab_table(out / "meta" / "tasks.parquet", "task", "task_index", [args.task_label])
+    write_vocab_table(out / "meta" / "subtasks.parquet", "subtask", "subtask_index",
+                      [args.subtask_label])
+    valid, ep_index, global_index = write_frame_masks(out, episodes)
+    write_train_intervals(out, valid, ep_index, global_index)
+    write_info_and_stats(out, episodes, args)
 
     print("\n" + "=" * 72)
-    print(f"DONE. LeRobot v2.1 dataset at: {out}")
+    print(f"DONE. LeRobot v3.0 dataset at: {out}")
     print(f"{len(episodes)} episode(s), {index_offset} frames total")
     if WARNINGS:
         print(f"\n{len(WARNINGS)} item(s) need your attention:\n")
         for w in dict.fromkeys(WARNINGS):
             print(f"  - {w}")
     print("=" * 72)
-
-
-def write_metadata(out: Path, episodes, args):
-    meta = out / "meta"
-    meta.mkdir(parents=True, exist_ok=True)
-
-    total_frames = sum(e["length"] for e in episodes)
-    total_videos = sum(len(e["videos"]) for e in episodes)
-    fps = episodes[0]["fps"]
-    height, width = episodes[0]["height"], episodes[0]["width"]
-    codec = "hevc" if args.copy_video else "h264"
-
-    features = {}
-    for key in CAMERA_KEYS:
-        if any(f"observation.images.{key}" in e["videos"] for e in episodes):
-            features[f"observation.images.{key}"] = {
-                "dtype": "video",
-                "shape": [height, width, 3],
-                "names": ["height", "width", "channel"],
-                "video_info": {
-                    "video.fps": float(fps),
-                    "video.codec": codec,
-                    "video.pix_fmt": "yuv420p",
-                    "video.is_depth_map": False,
-                    "has_audio": False,
-                },
-            }
-
-    pose_names = ["tx", "ty", "tz", "rx", "ry", "rz"]
-    features["observation.state"] = {"dtype": "float32", "shape": [6], "names": pose_names}
-    features["action"] = {"dtype": "float32", "shape": [6], "names": pose_names}
-    if not args.no_imu:
-        features["observation.imu"] = {
-            "dtype": "float32", "shape": [6],
-            "names": ["ax", "ay", "az", "gx", "gy", "gz"],
-        }
-    for name, dtype in (("timestamp", "float32"), ("frame_index", "int64"),
-                        ("episode_index", "int64"), ("index", "int64"),
-                        ("task_index", "int64")):
-        features[name] = {"dtype": dtype, "shape": [1], "names": None}
-    features["next.done"] = {"dtype": "bool", "shape": [1], "names": None}
-
-    info = {
-        "codebase_version": "v2.1",
-        "robot_type": args.robot_type,
-        "total_episodes": len(episodes),
-        "total_frames": total_frames,
-        "total_tasks": 1,
-        "total_videos": total_videos,
-        "total_chunks": (len(episodes) + CHUNKS_SIZE - 1) // CHUNKS_SIZE,
-        "chunks_size": CHUNKS_SIZE,
-        "fps": int(round(fps)),
-        "splits": {"train": f"0:{len(episodes)}"},
-        "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-        "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-        "features": features,
-        "_mytron_notes": {
-            "source": "vdego-c2 stereo egocentric capture, cropped 1920x1200 -> 1920x1080",
-            "departures_from_reference": [
-                "Two camera keys (cam_left, cam_right); the reference was monocular.",
-                "observation.state / action carry real VIO poses from trajectory.csv "
-                "instead of the reference's zero placeholders. state = pose at frame t, "
-                "action = pose at frame t+1; the final frame's action repeats its state.",
-                "observation.imu added as an extra 6-element feature; the reference has "
-                "no IMU slot."
-                if not args.no_imu else
-                "observation.imu omitted (--no-imu), matching the reference feature set.",
-            ],
-            "rotation_convention": (
-                "rx, ry, rz are an AXIS-ANGLE rotation vector in radians (axis scaled by "
-                "angle), converted from the quaternion in trajectory.csv -- the same "
-                "convention as cv2 rvec. They are NOT Euler angles."
-            ),
-            "state_units": "tx, ty, tz in metres; rx, ry, rz in radians.",
-            "imu_units": "ax, ay, az in m/s^2; gx, gy, gz in rad/s. Nearest-neighbour "
-                         "sampled at each video frame time from the higher-rate stream.",
-            "video_provenance": (
-                "Re-encoded from HEVC to h264 to match the reference's declared codec; "
-                "a second lossy generation after the resolution crop."
-                if not args.copy_video else
-                "Copied as HEVC without re-encoding (--copy-video)."
-            ),
-            "not_included": (
-                "hand_keypoints.json (MediaPipe 2D + triangulated 3D) is not part of the "
-                "reference format and is not carried into this dataset. episode_00.mcap "
-                "was excluded as a duplicate of the video and IMU streams."
-            ),
-        },
-    }
-    (meta / "info.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
-
-    with (meta / "episodes.jsonl").open("w", encoding="utf-8") as f:
-        for e in episodes:
-            f.write(json.dumps({
-                "episode_index": e["episode_index"],
-                "length": e["length"],
-                "tasks": [args.task_label],
-                "videos": e["videos"],
-            }) + "\n")
-
-    with (meta / "tasks.jsonl").open("w", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "task_index": 0,
-            "task_name": args.task_name,
-            "category": args.task_category,
-            "description": args.task_description,
-            "language": "en",
-        }) + "\n")
-
-    camera = {f"episode_{e['episode_index']:06d}": e["camera"] for e in episodes}
-    (meta / "camera.json").write_text(json.dumps(camera, indent=2) + "\n", encoding="utf-8")
-
-    print(f"\n  wrote meta/info.json, episodes.jsonl, tasks.jsonl, camera.json")
 
 
 if __name__ == "__main__":
