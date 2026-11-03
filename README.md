@@ -60,6 +60,42 @@ fisheye-cropped factory footage** (~20% of frames on clip -001) — hands are
 often at the periphery lost to the pinhole crop or out of view; a wider
 `--hfov` keeps more of the frame.
 
+### Producer #2 — camera pose (`scripts/estimate_camera_pose.py`)
+
+Monocular ORB + essential-matrix visual odometry on the undistorted video →
+a TUM trajectory for `--pose-dir`. **Up-to-scale and drift-prone** (no metric
+scale, no loop closure) — a real motion estimate to be replaced by the team's
+calibrated VIO (the calibration deliverable already has the camchain + IMU noise
+model). Pass the video's `fx/cx/cy` (printed by `build_hand_dataset.py`).
+
+### Producer #3 — quality flags (`scripts/compute_quality.py`)
+
+Computes the hand-kinematics checks (coordinate range, bone length, bmc proxy,
+velocity/acceleration/jerk) + camera-rotation validity from the extracted hands
+and pose → the `--quality-dir` parquet that drives `frame_masks`/`train_keep`.
+Hand flags are False where no hand is detected. The **7 VLM flags are left True**
+(placeholder) pending the team's VLM + prompts. Thresholds are CLI defaults to
+reconcile with the reference validation pipeline.
+
+### Producer #4 — subtasks (`scripts/make_anno_template.py`)
+
+Generates the `--anno` JSON (task/subtask vocab + per-frame segmentation) from
+clip metadata. Real subtask **labels and boundaries are an annotation product**
+(human or VLM); `--subtasks N` emits a uniform *placeholder* split to exercise
+the multi-subtask path. Edit the JSON (or fill it from a VLM pass) with real
+segmentation.
+
+### Full pipeline (all four producers)
+
+```bash
+python scripts/build_hand_dataset.py --input clips --output dataset \
+    --hands-dir hands_dir --pose-dir pose_dir \
+    --quality-dir quality_dir --anno anno.json
+```
+
+`meta/info.json` → `data_provenance` records, per field, whether it is real or a
+placeholder in any given build.
+
 ## Inputs
 
 - Camera calibration (`calibration/calibration.json`)
