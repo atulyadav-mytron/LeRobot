@@ -509,15 +509,19 @@ def write_info(out_root, eps, n_tasks, n_subtasks, valid_frames, args):
         },
         "video_policy": ("Each clip is one full original recording with its own data/video "
                          "file; per-episode timestamps start at zero."),
-        "_placeholders": {
-            "note": ("Fields produced from real inputs when the matching source is "
-                     "supplied; otherwise written as typed placeholders."),
-            "hand_keypoints": "zeros unless --hands-dir (3D hand-pose pipeline output)",
-            "hand_rotations": "identity quats unless --hands-dir",
-            "camera_pose": "zeros/identity unless --pose-dir (SLAM trajectory)",
-            "frame_mask_flags": "all-valid / train_keep=True unless --quality-dir",
-            "subtasks": "single subtask unless --anno provides segmentation",
-            "camera_intrinsics": "REAL: the 640x640 undistorted pinhole K",
+        "data_provenance": {
+            "note": "How each field in this build was produced (real vs placeholder).",
+            "camera_intrinsics": f"calibrated 640x640 pinhole (hfov={args.hfov:g})",
+            "hand_keypoints": ("mediapipe_world_landmarks (metres, wrist-relative)"
+                               if args.hands_dir else "placeholder: zeros"),
+            "hand_rotations": ("derived per-joint quaternions from bone directions"
+                               if args.hands_dir else "placeholder: identity quats"),
+            "camera_pose": ("monocular_vo: UP-TO-SCALE and drifting, not metric"
+                            if args.pose_dir else "placeholder: identity"),
+            "frame_mask_flags": ("validation pipeline"
+                                 if args.quality_dir else
+                                 "placeholder: all-valid, train_keep=True"),
+            "subtasks": ("annotation" if args.anno else "placeholder: single subtask"),
         },
     }
     (out_root / "meta" / "info.json").write_text(json.dumps(info, indent=2) + "\n")
