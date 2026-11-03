@@ -36,6 +36,30 @@ pip install numpy pyarrow opencv-python-headless    # + ffmpeg on PATH
 python scripts/build_hand_dataset.py --input /path/to/clips --output /path/to/dataset
 ```
 
+### Producer #1 — 3D hand pose (`scripts/extract_hands.py`)
+
+Produces the `--hands-dir` `.npz` (both hands: `[N,63]` keypoints + `[N,84]`
+per-joint quaternions) from the undistorted video, using **MediaPipe Tasks
+HandLandmarker** (Python 3.12; MediaPipe has no 3.15 wheel).
+
+```bash
+python3.12 -m venv venv_mp && venv_mp/bin/pip install mediapipe numpy opencv-python-headless
+curl -L -o models/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+venv_mp/bin/python scripts/extract_hands.py \
+  --video dataset/videos/observation.images.main/chunk-000/file-000.mp4 \
+  --stem MTL-BPT01426-001 --out hands_dir/
+# then rebuild:  build_hand_dataset.py ... --hands-dir hands_dir
+```
+
+Notes to reconcile with the reference pipeline: positions are MediaPipe
+**world landmarks** (metres, wrist-relative), not full camera-frame metric;
+per-joint rotations are derived from bone directions + palm normal; handedness
+follows MediaPipe (`--swap-handedness` to flip). **Detection rate is modest on
+fisheye-cropped factory footage** (~20% of frames on clip -001) — hands are
+often at the periphery lost to the pinhole crop or out of view; a wider
+`--hfov` keeps more of the frame.
+
 ## Inputs
 
 - Camera calibration (`calibration/calibration.json`)
