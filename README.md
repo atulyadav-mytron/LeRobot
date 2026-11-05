@@ -39,26 +39,36 @@ python scripts/build_hand_dataset.py --input /path/to/clips --output /path/to/da
 ### Producer #1 — 3D hand pose (`scripts/extract_hands.py`)
 
 Produces the `--hands-dir` `.npz` (both hands: `[N,63]` keypoints + `[N,84]`
-per-joint quaternions) from the undistorted video, using **MediaPipe Tasks
-HandLandmarker** (Python 3.12; MediaPipe has no 3.15 wheel).
+per-joint quaternions) using **MediaPipe Tasks HandLandmarker** (Python 3.12;
+MediaPipe has no 3.15 wheel).
+
+**Runs on the SOURCE fisheye** and undistorts its own *detection view*,
+decoupled from the dataset video: MediaPipe `world_landmarks` are metric and
+projection-independent, so the detection view is tuned purely for yield while
+`build_hand_dataset.py` renders the dataset video at its own FOV.
 
 ```bash
 python3.12 -m venv venv_mp && venv_mp/bin/pip install mediapipe numpy opencv-python-headless
 curl -L -o models/hand_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 venv_mp/bin/python scripts/extract_hands.py \
-  --video dataset/videos/observation.images.main/chunk-000/file-000.mp4 \
-  --stem MTL-BPT01426-001 --out hands_dir/
+  --video clips/MTL-BPT01426-001.mp4 --stem MTL-BPT01426-001 --out hands_dir/ \
+  --detect-size 896 --detect-hfov 90        # empirical best
 # then rebuild:  build_hand_dataset.py ... --hands-dir hands_dir
 ```
 
-Notes to reconcile with the reference pipeline: positions are MediaPipe
-**world landmarks** (metres, wrist-relative), not full camera-frame metric;
-per-joint rotations are derived from bone directions + palm normal; handedness
-follows MediaPipe (`--swap-handedness` to flip). **Detection rate is modest on
-fisheye-cropped factory footage** (~20% of frames on clip -001) — hands are
-often at the periphery lost to the pinhole crop or out of view; a wider
-`--hfov` keeps more of the frame.
+**Detection-view tuning (measured on clip -001).** A *tighter, higher-res*
+pinhole makes hands larger and less distorted and detects far more than a wide
+view — the opposite of intuition. Swept FOV×resolution: the old 640px/110° view
+gave 20.8% either-hand / 369 both-hand frames; **896px/90° gives 27.0% / 599**
+(+30% / +62%), lifting `train_keep` from 560→642. Going wider (125–140°) or
+higher-res (1152) was worse. Defaults are `--detect-size 896 --detect-hfov 90`.
+
+Notes to reconcile with the reference pipeline: positions are world landmarks
+(metres, wrist-relative), not full camera-frame metric; per-joint rotations are
+derived from bone directions + palm normal; handedness follows MediaPipe
+(`--swap-handedness` to flip). Detection on egocentric factory footage is still
+limited — hands are often out of frame — so a minority of frames carry hands.
 
 ### Producer #2 — camera pose (`scripts/estimate_camera_pose.py`)
 
