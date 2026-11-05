@@ -511,7 +511,8 @@ def write_info(out_root, eps, n_tasks, n_subtasks, valid_frames, args):
                          "file; per-episode timestamps start at zero."),
         "data_provenance": {
             "note": "How each field in this build was produced (real vs placeholder).",
-            "camera_intrinsics": f"calibrated 640x640 pinhole (hfov={args.hfov:g})",
+            "camera_intrinsics": ("explicit 640x640 K (--intrinsics)" if args.intrinsics
+                                  else f"calibrated 640x640 pinhole (hfov={args.hfov:g})"),
             "hand_keypoints": ("mediapipe_world_landmarks (metres, wrist-relative)"
                                if args.hands_dir else "placeholder: zeros"),
             "hand_rotations": ("derived per-joint quaternions from bone directions"
@@ -541,6 +542,11 @@ def main():
     ap.add_argument("--anno", default=None)
     ap.add_argument("--hfov", type=float, default=110.0,
                     help="Horizontal FOV of the 640 pinhole view (sets intrinsics)")
+    ap.add_argument("--intrinsics", default=None,
+                    help="Exact 'fx,fy,cx,cy' for the 640 view: the video is "
+                         "undistorted to this K and it is stored verbatim in "
+                         "camera_intrinsics. Overrides --hfov (use to byte-match a "
+                         "reference's intrinsics).")
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
@@ -558,9 +564,14 @@ def main():
         sys.exit(f"No .mp4 clips under {inp}")
     out.mkdir(parents=True, exist_ok=True)
 
-    K640 = new_K(args.hfov)
-    print(f"640 pinhole intrinsics (hfov={args.hfov:g}): "
-          f"fx={K640[0,0]:.3f} cx={K640[0,2]:.1f}")
+    if args.intrinsics:
+        fx, fy, cx, cy = (float(v) for v in args.intrinsics.split(","))
+        K640 = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
+        print(f"640 intrinsics (explicit): fx={fx:.6f} fy={fy:.6f} cx={cx:.6f} cy={cy:.6f}")
+    else:
+        K640 = new_K(args.hfov)
+        print(f"640 pinhole intrinsics (hfov={args.hfov:g}): "
+              f"fx={K640[0,0]:.3f} cx={K640[0,2]:.1f}")
 
     task_table, subtask_table = {}, {}
     eps, offset = [], 0
