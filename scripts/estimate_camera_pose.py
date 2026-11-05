@@ -10,12 +10,15 @@ and observation.state.camera_rotation.
 HONEST LIMITATIONS (read before trusting the numbers)
 -----------------------------------------------------
 This is ORB + essential-matrix monocular VO, not full VIO/SLAM:
-  * Scale is arbitrary and NOT metric. Monocular VO has no scale; each step's
-    translation is a unit vector, so distances are up-to-scale and not even
-    globally consistent. (The 30 Hz IMU can't fix this -- see the README.)
-  * It drifts, and degenerates under near-pure rotation or low texture; frames
-    with too few matches hold the previous pose.
-  * No loop closure or global bundle adjustment.
+  * Scale is NOT metric. Monocular VO has no metric scale. Each step's
+    translation direction is recoverPose's unit vector, scaled by the de-rotated
+    median parallax so step length tracks real motion (self-consistent up-to-
+    scale) instead of a constant. Absolute metres still need the team's VIO.
+  * Rotation-gating: frames whose de-rotated parallax is below --px-min (static
+    or near-pure rotation) take rotation only, no translation -- this removes the
+    main drift source on egocentric footage. Rotation is still applied.
+  * It still drifts over long runs; no loop closure or global bundle adjustment.
+  * Frames with too few matches/inliers carry the previous pose unchanged.
 It exists so observation.state.camera_* carries a real motion estimate rather
 than zeros. Replace it with the team's calibrated VIO (same --pose-dir contract,
 camchain + IMU noise model already in the calibration deliverable) for metric,
@@ -86,6 +89,16 @@ def main():
     ap.add_argument("--cx", type=float, required=True)
     ap.add_argument("--cy", type=float, required=True)
     ap.add_argument("--min-matches", type=int, default=20)
+    ap.add_argument("--min-inliers", type=int, default=30,
+                    help="Below this many pose inliers, hold translation (rotation only)")
+    ap.add_argument("--px-min", type=float, default=0.7,
+                    help="De-rotated median parallax (px) below which a frame is "
+                         "treated as rotation-only (no translation step)")
+    ap.add_argument("--px-cap", type=float, default=60.0,
+                    help="Parallax (px) is capped here before scaling the step")
+    ap.add_argument("--px-fail", type=float, default=300.0,
+                    help="Above this parallax the pose estimate is untrusted -> "
+                         "rotation-only (likely a bad R from blur/outliers)")
     args = ap.parse_args()
 
     stream = ffprobe(args.video)
@@ -93,6 +106,7 @@ def main():
     fps = fps_of(stream)
     fy = args.fy if args.fy else args.fx
     K = np.array([[args.fx, 0, args.cx], [0, fy, args.cy], [0, 0, 1]], dtype=np.float64)
+    Kinv = np.linalg.inv(K)
 
     orb = cv2.ORB_create(nfeatures=2000)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
@@ -109,13 +123,28 @@ def main():
 
     emit(0, cur_R, cur_t)
 
+    def derotated_parallax(p0, p1, R):
+        """Median residual pixel motion after removing R's rotational flow.
+
+        ~0 for pure rotation / static; grows with translation parallax. Used both
+        to gate translation and to scale each step, so step length tracks real
+        motion instead of a meaningless constant (recoverPose's unit vector)."""
+        ones = np.ones((len(p0), 1))
+        rays = (Kinv @ np.hstack([p0, ones]).T)          # 3xN
+        rot = R @ rays
+        proj = K @ rot
+        p0rot = (proj[:2] / proj[2]).T                    # Nx2
+        return float(np.median(np.linalg.norm(p1 - p0rot, axis=1)))
+
     dec = subprocess.Popen(
         ["ffmpeg", "-v", "error", "-i", str(args.video), "-f", "rawvideo",
          "-pix_fmt", "gray", "-"], stdout=subprocess.PIPE)
     nbytes = w * h
     prev_kp = prev_des = None
     idx = 0
-    low = 0
+    held = 0      # frames with no pose at all
+    rot_only = 0  # frames gated to rotation-only (static / pure rotation)
+    moving = 0
     while True:
         raw = dec.stdout.read(nbytes)
         if len(raw) < nbytes:
@@ -124,7 +153,7 @@ def main():
         kp, des = orb.detectAndCompute(gray, None)
 
         if idx > 0:
-            R_rel, t_rel, ok = np.eye(3), np.zeros((3, 1)), False
+            R_rel, t_step, ok = np.eye(3), np.zeros((3, 1)), False
             if des is not None and prev_des is not None and len(kp) > 8 and len(prev_kp) > 8:
                 matches = bf.knnMatch(prev_des, des, k=2)
                 good = [m for m, n in (mn for mn in matches if len(mn) == 2)
@@ -134,12 +163,26 @@ def main():
                     p1 = np.float32([kp[m.trainIdx].pt for m in good])
                     E, mask = cv2.findEssentialMat(p1, p0, K, cv2.RANSAC, 0.999, 1.0)
                     if E is not None and E.shape == (3, 3):
-                        _, R_rel, t_rel, _ = cv2.recoverPose(E, p1, p0, K, mask=mask)
+                        n_in, R_rel, t_dir, pmask = cv2.recoverPose(E, p1, p0, K, mask=mask)
                         ok = True
+                        inl = (pmask.ravel() > 0)
+                        if inl.sum() >= args.min_inliers:
+                            px = derotated_parallax(p0[inl], p1[inl], R_rel)
+                            if args.px_min <= px <= args.px_fail:
+                                # direction from recoverPose; magnitude = parallax,
+                                # capped and normalised by focal length (angular ~
+                                # translation/depth), so steps are bounded & comparable
+                                scale = min(px, args.px_cap) / args.fx
+                                t_step = t_dir * scale
+                                moving += 1
+                            else:
+                                rot_only += 1   # static/rotation (low px) or bad pose (high px)
+                        else:
+                            rot_only += 1
             if not ok:
-                low += 1  # too few matches / degenerate: hold pose this step
-            # chain world->cam:  x_i = R_rel x_{i-1} + t_rel
-            cur_t = cur_t + cur_R @ t_rel
+                held += 1   # no usable pose: carry previous pose unchanged
+            # chain world->cam:  x_i = R_rel x_{i-1} + t_step
+            cur_t = cur_t + cur_R @ t_step
             cur_R = R_rel @ cur_R
             emit(idx, cur_R, cur_t)
 
@@ -153,10 +196,14 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     p = out / f"{args.stem}.tum"
     with p.open("w") as f:
-        f.write("# monocular VO (up-to-scale, drift) -- t tx ty tz qx qy qz qw\n")
+        f.write("# monocular VO (up-to-scale, rotation-gated, parallax-scaled) "
+                "-- t tx ty tz qx qy qz qw\n")
         for r in rows:
             f.write(" ".join(f"{v:.6f}" for v in r) + "\n")
-    print(f"{args.stem}: {idx} frames, {low} low-match steps held -> {p}")
+    pos = np.array([r[1:4] for r in rows])
+    path_len = float(np.sum(np.linalg.norm(np.diff(pos, axis=0), axis=1))) if len(pos) > 1 else 0.0
+    print(f"{args.stem}: {idx} frames | moving {moving} | rotation-only {rot_only} | "
+          f"no-pose {held} | path-len {path_len:.1f} (up-to-scale) -> {p}")
 
 
 if __name__ == "__main__":

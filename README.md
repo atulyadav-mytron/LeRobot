@@ -73,10 +73,22 @@ limited — hands are often out of frame — so a minority of frames carry hands
 ### Producer #2 — camera pose (`scripts/estimate_camera_pose.py`)
 
 Monocular ORB + essential-matrix visual odometry on the undistorted video →
-a TUM trajectory for `--pose-dir`. **Up-to-scale and drift-prone** (no metric
-scale, no loop closure) — a real motion estimate to be replaced by the team's
-calibrated VIO (the calibration deliverable already has the camchain + IMU noise
-model). Pass the video's `fx/cx/cy` (printed by `build_hand_dataset.py`).
+a TUM trajectory for `--pose-dir`. Pass the video's `fx/cx/cy` (printed by
+`build_hand_dataset.py`). Two tuning steps keep the trajectory self-consistent:
+
+- **Rotation gating** — each frame's de-rotated median parallax is measured;
+  below `--px-min` (static / near-pure rotation) the frame takes **rotation only,
+  no translation**, removing the main egocentric drift source.
+- **Parallax-scaled, bounded steps** — translation direction from `recoverPose`,
+  magnitude = parallax capped at `--px-cap` and normalised by focal length, so
+  step length tracks real motion instead of a constant unit vector; frames above
+  `--px-fail` (bad pose from blur/outliers) are rejected to rotation-only.
+
+Measured on clip -001: gating caught **2,517 rotation-only** frames; path length
+dropped 42,016→2,019 and position range ±1178→±78 (far less drift). Still
+**up-to-scale, not metric** (monocular limit; the 30 Hz IMU can't fix scale) —
+replace with the team's calibrated VIO (camchain + IMU noise model in hand) via
+the same `--pose-dir` contract.
 
 ### Producer #3 — quality flags (`scripts/compute_quality.py`)
 
