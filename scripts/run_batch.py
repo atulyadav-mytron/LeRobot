@@ -154,7 +154,7 @@ def quality_stage(stem, dirs):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", action="append", required=True)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None, help="GCS output (required for full/assemble)")
     ap.add_argument("--work", required=True)
     ap.add_argument("--mano-dir", default=None)
     ap.add_argument("--hands", choices=["wilor", "mediapipe"], default="wilor")
@@ -173,6 +173,8 @@ def main():
                          "artifacts from --staging, build the dataset, upload.")
     ap.add_argument("--staging", default=None, help="GCS prefix for shared per-clip artifacts.")
     args = ap.parse_args()
+    if args.mode != "produce" and not args.out:
+        ap.error("--out is required for mode full/assemble")
 
     work = Path(args.work)
     dirs = {k: work / k for k in ("clips", "videos", "hands", "pose", "quality")}
