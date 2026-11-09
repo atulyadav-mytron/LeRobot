@@ -36,13 +36,15 @@ from pathlib import Path
 
 
 def nb_frames(mp4: Path) -> int:
-    out = subprocess.check_output([
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=nb_frames", "-of",
-        "default=noprint_wrappers=1:nokey=1", str(mp4)], text=True).strip()
+    if not mp4.exists():
+        return 0           # assemble step has no source mp4; seg falls back to None
     try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=nb_frames", "-of",
+            "default=noprint_wrappers=1:nokey=1", str(mp4)], text=True).strip()
         return int(out)
-    except ValueError:
+    except (ValueError, subprocess.CalledProcessError):
         return 0
 
 
@@ -56,10 +58,14 @@ def main():
     args = ap.parse_args()
 
     inp = Path(args.input)
-    clips = [inp.with_suffix("")] if inp.is_file() else \
-            sorted({p.with_suffix("") for p in inp.glob("*.mp4")})
+    if inp.is_file():
+        clips = [inp.with_suffix("")]
+    else:
+        stems = {p.with_suffix("") for p in inp.glob("*.mp4")}
+        stems |= {p.with_suffix("") for p in inp.glob("*.json")}  # assemble: json only
+        clips = sorted(stems)
     if not clips:
-        sys.exit(f"No .mp4 clips under {inp}")
+        sys.exit(f"No clips under {inp}")
 
     anno = {}
     for stem in clips:
