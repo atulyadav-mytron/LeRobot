@@ -119,8 +119,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--coord-range", type=float, default=0.3)   # m from wrist
-    ap.add_argument("--bl-min", type=float, default=0.005)      # m
-    ap.add_argument("--bl-max", type=float, default=0.09)       # m
+    ap.add_argument("--bl-min", type=float, default=0.003)      # m
+    ap.add_argument("--bl-max", type=float, default=0.13)       # m (hand bones up to ~13cm)
     ap.add_argument("--v-max", type=float, default=3.0)         # m/s
     ap.add_argument("--a-max", type=float, default=60.0)        # m/s^2
     ap.add_argument("--j-max", type=float, default=2000.0)      # m/s^3

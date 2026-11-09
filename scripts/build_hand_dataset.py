@@ -526,7 +526,7 @@ def write_info(out_root, eps, n_tasks, n_subtasks, valid_frames, args):
             "note": "How each field in this build was produced (real vs placeholder).",
             "camera_intrinsics": ("explicit 640x640 K (--intrinsics)" if args.intrinsics
                                   else f"calibrated 640x640 pinhole (hfov={args.hfov:g})"),
-            "hand_keypoints": ("mediapipe_world_landmarks (metres, wrist-relative)"
+            "hand_keypoints": ("WiLoR 3D keypoints (metres, wrist-relative)"
                                if args.hands_dir else "placeholder: zeros"),
             "hand_rotations": ("derived per-joint quaternions from bone directions"
                                if args.hands_dir else "placeholder: identity quats"),
