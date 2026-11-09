@@ -5,7 +5,7 @@
 set -uo pipefail
 export HOME=/root
 export DEBIAN_FRONTEND=noninteractive
-export PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin:$PATH
+export PATH=/opt/venv/bin:/opt/conda/bin:/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
 OUT="gs://annotationportal-raw/lerobot_sample_10hr"
 SRC1="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1102"
