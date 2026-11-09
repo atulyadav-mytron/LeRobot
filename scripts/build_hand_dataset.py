@@ -45,6 +45,7 @@ USAGE
 import argparse
 import json
 import math
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -261,10 +262,22 @@ def build_clip(stem_path: Path, ep_idx: int, out_root: Path, index_offset: int,
     fps = fps_of(stream)
     chunk_index, file_index = ep_idx // CHUNKS_SIZE, ep_idx % CHUNKS_SIZE
 
-    # video
+    # video: reuse a pre-undistorted 640 clip if --video-dir provides one (the
+    # batch pipeline undistorts once and reuses it for VO + the dataset), else
+    # undistort from the source here.
     video_rel = VIDEO_PATH.format(video_key=VIDEO_KEY,
                                   chunk_index=chunk_index, file_index=file_index)
-    n = undistort_to_640(mp4, out_root / video_rel, fps, K640)
+    dst = out_root / video_rel
+    pre = (Path(args.video_dir) / f"{stem}.mp4") if args.video_dir else None
+    if pre is not None and pre.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(pre, dst)
+        vs = ffprobe(dst)
+        n = int(vs["nb_frames"]) if vs.get("nb_frames") else 0
+        fps = fps_of(vs)
+        print(f"  reused 640 video {pre.name} ({n} frames)")
+    else:
+        n = undistort_to_640(mp4, dst, fps, K640)
 
     # annotations / metadata
     meta_json = None
@@ -547,6 +560,9 @@ def main():
                          "undistorted to this K and it is stored verbatim in "
                          "camera_intrinsics. Overrides --hfov (use to byte-match a "
                          "reference's intrinsics).")
+    ap.add_argument("--video-dir", default=None,
+                    help="Dir of pre-undistorted 640 videos (<stem>.mp4) to reuse "
+                         "instead of undistorting from source (batch pipeline).")
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
