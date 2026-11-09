@@ -160,6 +160,9 @@ def main():
     ap.add_argument("--hands", choices=["wilor", "mediapipe"], default="wilor")
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--require-hands", type=int, default=0,
+                    help="Abort (exit 2) if fewer than N hand-present frames are detected "
+                         "across all clips -- guards against a silently-broken hand model.")
     args = ap.parse_args()
 
     work = Path(args.work)
@@ -195,6 +198,20 @@ def main():
     log("CPU pool done; waiting on GPU worker...")
     log.push()
     gpu_t.join()
+
+    # guard: a silently-broken hand model would produce all-zero hands
+    total_hands = 0
+    for u in uris:
+        f = dirs["hands"] / f"{Path(u).stem}.npz"
+        if f.exists():
+            z = np.load(f)
+            total_hands += int(z["hand_right_present"].sum() + z["hand_left_present"].sum())
+    log(f"total hand-present frames across clips: {total_hands}")
+    log.push()
+    if args.require_hands and total_hands < args.require_hands:
+        log(f"ABORT: require-hands={args.require_hands} but only {total_hands} detected "
+            "-- the hand model is likely broken (not shipping an empty dataset).")
+        sys.exit(2)
 
     # quality (needs hands + pose), parallel
     usable = [Path(u).stem for u in uris

@@ -34,37 +34,35 @@ echo "=== STARTED $(date -u) on $NAME/$ZONE ==="
 marker STARTED started
 nvidia-smi || echo "WARN: nvidia-smi failed"
 
-echo "=== system deps ==="
-apt-get update -y && apt-get install -y python3-pip python3-venv ffmpeg git
+echo "=== system deps (libgl* for opencv; ffmpeg for video) ==="
+set -e   # from here, any failed install HALTS the script (-> self-delete, no silent-broken run)
+apt-get update -y
+apt-get install -y python3-pip python3-venv git build-essential ffmpeg \
+    libgl1 libglib2.0-0 libsm6 libxext6
 
-echo "=== python venv (self-contained; independent of the image layout) ==="
+echo "=== python venv + validated WiLoR recipe ==="
 python3 -m venv /opt/venv
-"$PYBIN" -m pip install --upgrade pip wheel
-"$PYBIN" -m pip install torch torchvision          # Linux x86_64 wheels bundle CUDA
-"$PYBIN" -m pip install opencv-python-headless numpy pyarrow pandas
-"$PYBIN" -m pip install "git+https://github.com/warmshao/WiLoR-mini.git"
-"$PYBIN" -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+"$PYBIN" -m pip install --upgrade pip setuptools wheel Cython numpy dill
+# chumpy (a WiLoR-mini dep) only builds with --no-build-isolation; this also pulls
+# torch (CUDA), opencv, ultralytics, timm, smplx, etc. MANO auto-downloads from HF.
+"$PYBIN" -m pip install --no-build-isolation "git+https://github.com/warmshao/WiLoR-mini"
+"$PYBIN" -m pip install pyarrow        # extra needed by our pipeline
+"$PYBIN" -c "import wilor_mini, cv2, pyarrow, torch; print('deps OK; cuda', torch.cuda.is_available())"
+set +e  # back to tolerant mode for the run itself
 
 echo "=== clone repo ==="
 cd /home && rm -rf repo && git clone --depth 1 https://github.com/atulyadav-mytron/LeRobot.git repo
 
-echo "=== fetch MANO ==="
-mkdir -p /opt/mano "$HOME/.cache/wilor_mini/mano_data"
-gcloud storage cp "$OUT/../mano/MANO_RIGHT.pkl" /opt/mano/ 2>/dev/null \
-  || gcloud storage cp "gs://annotationportal-raw/mano/MANO_RIGHT.pkl" /opt/mano/ || true
-gcloud storage cp "gs://annotationportal-raw/mano/MANO_LEFT.pkl" /opt/mano/ || true
-cp /opt/mano/MANO_*.pkl "$HOME/.cache/wilor_mini/mano_data/" 2>/dev/null || true
-
 RB=/home/repo/scripts/run_batch.py
-echo "=== VALIDATE on 2 clips ==="
+echo "=== VALIDATE on 2 clips (require >=1 real hand detection) ==="
 if ! "$PYBIN" "$RB" --src "$SRC1" --src "$SRC2" --out "$OUT/_validate" \
-     --work "$WORK/val" --mano-dir /opt/mano --hands wilor --limit 2; then
+     --work "$WORK/val" --hands wilor --limit 2 --require-hands 1; then
   echo "=== VALIDATION FAILED -- aborting before full run ==="; marker VALIDATION_FAILED failed; exit 1
 fi
 marker VALIDATED ok
 
 echo "=== FULL RUN (all clips) ==="
 "$PYBIN" "$RB" --src "$SRC1" --src "$SRC2" --out "$OUT" \
-  --work "$WORK/full" --mano-dir /opt/mano --hands wilor
+  --work "$WORK/full" --hands wilor
 echo "=== DONE $(date -u) ==="
 marker DONE done
