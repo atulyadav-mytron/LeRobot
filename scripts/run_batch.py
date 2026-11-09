@@ -109,14 +109,14 @@ def cpu_stage(uri, dirs):
     return stem
 
 
-def gpu_stage(stem, dirs, hands_impl, mano_dir):
+def gpu_stage(stem, dirs, hands_impl, mano_dir, frame_stride=1):
     npz = dirs["hands"] / f"{stem}.npz"
     if npz.exists():
         return
     src = dirs["clips"] / f"{stem}.mp4"
     if hands_impl == "wilor":
         cmd = [PY, str(HERE / "extract_hands_wilor.py"), "--video", str(src), "--stem", stem,
-               "--out", str(dirs["hands"])]
+               "--out", str(dirs["hands"]), "--frame-stride", str(frame_stride)]
         if mano_dir:
             cmd += ["--mano-dir", mano_dir]
     else:
@@ -125,13 +125,13 @@ def gpu_stage(stem, dirs, hands_impl, mano_dir):
     sh(cmd)
 
 
-def gpu_worker(uris, dirs, hands_impl, mano_dir, log):
+def gpu_worker(uris, dirs, hands_impl, mano_dir, log, frame_stride=1):
     """Single GPU consumer: streams WiLoR over clips, overlapping the CPU pool."""
     for i, uri in enumerate(uris, 1):
         stem = Path(uri).stem
         try:
             ensure_download(uri, dirs["clips"])   # usually already fetched by CPU side
-            gpu_stage(stem, dirs, hands_impl, mano_dir)
+            gpu_stage(stem, dirs, hands_impl, mano_dir, frame_stride)
         except Exception as e:
             with _lock:
                 _failed.add(stem)
@@ -163,6 +163,15 @@ def main():
     ap.add_argument("--require-hands", type=int, default=0,
                     help="Abort (exit 2) if fewer than N hand-present frames are detected "
                          "across all clips -- guards against a silently-broken hand model.")
+    ap.add_argument("--frame-stride", type=int, default=1,
+                    help="Run WiLoR every Nth frame (held between); 3 ~= 10fps hands.")
+    ap.add_argument("--shard", default=None,
+                    help="'i/N': process only clips[i::N] (for splitting across VMs).")
+    ap.add_argument("--mode", choices=["full", "produce", "assemble"], default="full",
+                    help="full: process+build+upload. produce: process this shard and upload "
+                         "per-clip artifacts to --staging (no build). assemble: download all "
+                         "artifacts from --staging, build the dataset, upload.")
+    ap.add_argument("--staging", default=None, help="GCS prefix for shared per-clip artifacts.")
     args = ap.parse_args()
 
     work = Path(args.work)
@@ -171,14 +180,32 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
     log = Log(work / "run.log", args.out)
 
+    # ---- assemble mode: pull every shard's artifacts, build once, upload -------
+    if args.mode == "assemble":
+        stg = args.staging.rstrip("/")
+        for sub in ("clips", "videos", "hands", "pose", "quality"):
+            sh(["gcloud", "storage", "cp", "--recursive", f"{stg}/{sub}/*", str(dirs[sub]) + "/"])
+        n = len(list(dirs["clips"].glob("*.json")))
+        log(f"assemble: pulled artifacts for {n} clips from {stg}")
+        log.push()
+        _build_and_upload(dirs, work, args, log)
+        print("RUN_BATCH_DONE")
+        return
+
     uris = sorted(u for p in args.src for u in gcs_ls_mp4(p))
     if args.limit:
         uris = uris[:args.limit]
-    log(f"clips: {len(uris)}; hands={args.hands}; CPU+GPU overlapped (workers={args.workers})")
+    if args.shard:
+        i, n = (int(x) for x in args.shard.split("/"))
+        uris = uris[i::n]
+        log(f"shard {i}/{n}: {len(uris)} clips")
+    log(f"clips: {len(uris)}; hands={args.hands}; stride={args.frame_stride}; "
+        f"mode={args.mode}; CPU+GPU overlapped (workers={args.workers})")
     log.push()
 
     # GPU worker (WiLoR) runs concurrently with the CPU pool (undistort+VO).
-    gpu_t = threading.Thread(target=gpu_worker, args=(uris, dirs, args.hands, args.mano_dir, log))
+    gpu_t = threading.Thread(target=gpu_worker,
+                             args=(uris, dirs, args.hands, args.mano_dir, log, args.frame_stride))
     gpu_t.start()
 
     done = []
@@ -222,7 +249,26 @@ def main():
     log(f"quality done for {len(usable)} clips ({len(_failed)} failed)")
     log.push()
 
-    # anno + build + upload
+    # ---- produce mode: upload this shard's per-clip artifacts, then stop -------
+    if args.mode == "produce":
+        stg = args.staging.rstrip("/")
+        for s in usable:
+            for sub, ext in (("clips", ".json"), ("videos", ".mp4"),
+                             ("hands", ".npz"), ("pose", ".tum"), ("quality", ".parquet")):
+                f = dirs[sub] / f"{s}{ext}"
+                if f.exists():
+                    sh(["gcloud", "storage", "cp", str(f), f"{stg}/{sub}/{s}{ext}"])
+        log(f"produce: uploaded artifacts for {len(usable)} clips -> {stg}")
+        log.push()
+        print("RUN_BATCH_DONE")
+        return
+
+    _build_and_upload(dirs, work, args, log)
+    print("RUN_BATCH_DONE")
+    return
+
+
+def _build_and_upload(dirs, work, args, log):
     sh([PY, str(HERE / "make_anno_template.py"), "--input", str(dirs["clips"]),
         "--out", str(work / "anno.json"), "--subtasks", "1"])
     ds = work / "dataset"
@@ -235,9 +281,9 @@ def main():
     log("build complete; uploading...")
     log.push()
     sh(["gcloud", "storage", "cp", "--recursive", str(ds) + "/*", args.out.rstrip("/") + "/"])
-    log(f"UPLOAD complete -> {args.out}  ({len(usable)} episodes, {len(_failed)} failed)")
+    n_ep = len(list((ds / "data" / "chunk-000").glob("*.parquet")))
+    log(f"UPLOAD complete -> {args.out}  ({n_ep} episodes, {len(_failed)} failed)")
     log.push()
-    print("RUN_BATCH_DONE")
 
 
 def _safe(fn, *a):

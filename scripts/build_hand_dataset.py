@@ -252,24 +252,23 @@ def load_anno(anno_path, stem, meta_json):
 
 def build_clip(stem_path: Path, ep_idx: int, out_root: Path, index_offset: int,
                K640: np.ndarray, args, task_table, subtask_table):
-    mp4 = stem_path.with_suffix(".mp4")
-    if not mp4.exists():
-        return None
     stem = stem_path.name
+    mp4 = stem_path.with_suffix(".mp4")
+    pre = (Path(args.video_dir) / f"{stem}.mp4") if args.video_dir else None
+    reuse = pre is not None and pre.exists()
+    # Need either a source mp4 (to undistort) or a pre-undistorted 640 video (reuse,
+    # as in the assemble step where source clips are not re-downloaded).
+    if not mp4.exists() and not reuse:
+        return None
     print(f"\n--- episode {ep_idx:06d}  <-  {stem} ---", flush=True)
-
-    stream = ffprobe(mp4)
-    fps = fps_of(stream)
     chunk_index, file_index = ep_idx // CHUNKS_SIZE, ep_idx % CHUNKS_SIZE
 
-    # video: reuse a pre-undistorted 640 clip if --video-dir provides one (the
-    # batch pipeline undistorts once and reuses it for VO + the dataset), else
-    # undistort from the source here.
+    # video: reuse the pre-undistorted 640 clip when available (fps/frames come
+    # from it, so the source mp4 is not required), else undistort from source.
     video_rel = VIDEO_PATH.format(video_key=VIDEO_KEY,
                                   chunk_index=chunk_index, file_index=file_index)
     dst = out_root / video_rel
-    pre = (Path(args.video_dir) / f"{stem}.mp4") if args.video_dir else None
-    if pre is not None and pre.exists():
+    if reuse:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(pre, dst)
         vs = ffprobe(dst)
@@ -277,6 +276,7 @@ def build_clip(stem_path: Path, ep_idx: int, out_root: Path, index_offset: int,
         fps = fps_of(vs)
         print(f"  reused 640 video {pre.name} ({n} frames)")
     else:
+        fps = fps_of(ffprobe(mp4))
         n = undistort_to_640(mp4, dst, fps, K640)
 
     # annotations / metadata
@@ -573,7 +573,10 @@ def main():
     if inp.is_file():
         clips = [inp.with_suffix("")]
     else:
-        clips = sorted({p.with_suffix("") for p in inp.glob("*.mp4")})
+        # discover by source mp4, or by metadata json (assemble step has no mp4)
+        stems = {p.with_suffix("") for p in inp.glob("*.mp4")}
+        stems |= {p.with_suffix("") for p in inp.glob("*.json")}
+        clips = sorted(stems)
     if args.limit:
         clips = clips[:args.limit]
     if not clips:
