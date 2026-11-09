@@ -7,7 +7,7 @@ export HOME=/root DEBIAN_FRONTEND=noninteractive
 export PATH=/opt/venv/bin:/opt/conda/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 
 OUT="gs://annotationportal-raw/lerobot_sample_10hr"
-md() { curl -s -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
+md() { curl -s -f -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
 STAGING="$(md staging)"; [ -z "$STAGING" ] && STAGING="$OUT/_staging"
 LIMIT="$(md limit)"
 SRC1="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1102"

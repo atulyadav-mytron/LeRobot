@@ -6,7 +6,7 @@ export HOME=/root DEBIAN_FRONTEND=noninteractive
 export PATH=/opt/venv/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 
 BASE="gs://annotationportal-raw/lerobot_sample_10hr"
-md() { curl -s -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
+md() { curl -s -f -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
 STAGING="$(md staging)"; [ -z "$STAGING" ] && STAGING="$BASE/_staging"
 OUT="$(md outdir)"; [ -z "$OUT" ] && OUT="$BASE"
 WORK=/home/work ; PYBIN=/opt/venv/bin/python ; LOG=/var/log/lerobot_assemble.log
