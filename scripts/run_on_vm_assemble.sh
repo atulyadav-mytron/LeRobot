@@ -19,7 +19,7 @@ cleanup() { local rc=$?; marker "EXIT_$rc" "exit $rc";
   gcloud storage cp "$LOG" "$BASE/_logs/assemble.log" 2>/dev/null || true
   gcloud compute instances delete "$NAME" --zone="$ZONE" --quiet || shutdown -h now; }
 trap cleanup EXIT
-( sleep 7200; shutdown -h now ) &   # 2h safety
+( sleep 25200; shutdown -h now ) &   # 7h safety (waits for shards + assemble)
 
 echo "=== ASSEMBLE STARTED $(date -u) ==="; marker STARTED started
 set -e
@@ -30,6 +30,23 @@ python3 -m venv /opt/venv
 "$PYBIN" -m pip install numpy pandas pyarrow opencv-python-headless
 set +e
 cd /home && rm -rf repo && git clone --depth 1 https://github.com/atulyadav-mytron/LeRobot.git repo
+
+# Coordinator: wait for all 4 produce shards to finish (self-coordinating, no
+# external session needed). Tolerates a FAILED shard and a hard deadline so the
+# dataset is still assembled from whatever completed.
+echo "=== WAIT FOR SHARDS ==="
+DEADLINE=$(( $(date +%s) + 18000 ))   # 5h hard cap
+while true; do
+  mk=$(gcloud storage ls "$BASE/_logs/" 2>/dev/null | sed 's#.*/##')
+  dn=$(echo "$mk" | grep -cE "shard[0-3]_4_DONE")
+  en=$(echo "$mk" | grep -cE "shard[0-3]_4_(DONE|FAILED)")
+  echo "  shards done=$dn ended=$en $(date -u)"
+  [ "$dn" -ge 4 ] && { echo "all 4 shards DONE"; break; }
+  [ "$en" -ge 4 ] && { echo "all shards ended (some FAILED); assembling the DONE ones"; break; }
+  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "deadline reached; assembling whatever is available"; break; }
+  sleep 60
+done
+marker SHARDS_READY ready
 echo "=== BUILD + UPLOAD ==="
 if "$PYBIN" /home/repo/scripts/run_batch.py --src "$STAGING" --mode assemble \
      --staging "$STAGING" --out "$OUT" --work "$WORK"; then
