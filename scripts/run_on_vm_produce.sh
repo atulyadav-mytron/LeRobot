@@ -7,7 +7,9 @@ export HOME=/root DEBIAN_FRONTEND=noninteractive
 export PATH=/opt/venv/bin:/opt/conda/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 
 OUT="gs://annotationportal-raw/lerobot_sample_10hr"
-STAGING="$OUT/_staging"
+md() { curl -s -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
+STAGING="$(md staging)"; [ -z "$STAGING" ] && STAGING="$OUT/_staging"
+LIMIT="$(md limit)"
 SRC1="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1102"
 SRC2="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1107"
 WORK=/home/work ; PYBIN=/opt/venv/bin/python ; LOG=/var/log/lerobot_run.log
@@ -38,10 +40,11 @@ python3 -m venv /opt/venv
 set +e
 
 cd /home && rm -rf repo && git clone --depth 1 https://github.com/atulyadav-mytron/LeRobot.git repo
-echo "=== PRODUCE shard $SHARD ==="
+echo "=== PRODUCE shard $SHARD (staging=$STAGING limit=${LIMIT:-none}) ==="
+LIM=(); [ -n "$LIMIT" ] && LIM=(--limit "$LIMIT")
 if "$PYBIN" /home/repo/scripts/run_batch.py --src "$SRC1" --src "$SRC2" \
      --mode produce --shard "$SHARD" --staging "$STAGING" --work "$WORK" \
-     --hands wilor --frame-stride 3 --require-hands 1; then
+     --hands wilor --frame-stride 3 --require-hands 1 "${LIM[@]}"; then
   echo "=== shard $SHARD DONE ==="; marker DONE done
 else
   echo "=== shard $SHARD FAILED ==="; marker FAILED failed

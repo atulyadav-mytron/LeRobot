@@ -5,16 +5,18 @@ set -uo pipefail
 export HOME=/root DEBIAN_FRONTEND=noninteractive
 export PATH=/opt/venv/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 
-OUT="gs://annotationportal-raw/lerobot_sample_10hr"
-STAGING="$OUT/_staging"
+BASE="gs://annotationportal-raw/lerobot_sample_10hr"
+md() { curl -s -H "Metadata-Flavor: Google" "http://metadata/computeMetadata/v1/instance/attributes/$1" 2>/dev/null; }
+STAGING="$(md staging)"; [ -z "$STAGING" ] && STAGING="$BASE/_staging"
+OUT="$(md outdir)"; [ -z "$OUT" ] && OUT="$BASE"
 WORK=/home/work ; PYBIN=/opt/venv/bin/python ; LOG=/var/log/lerobot_assemble.log
 mkdir -p "$WORK" ; exec > >(tee -a "$LOG") 2>&1
 
 NAME=$(curl -s -H "Metadata-Flavor: Google" http://metadata/computeMetadata/v1/instance/name)
 ZONE=$(curl -s -H "Metadata-Flavor: Google" http://metadata/computeMetadata/v1/instance/zone | awk -F/ '{print $NF}')
-marker() { echo "$2 $(date -u)" >/tmp/_m; gcloud storage cp /tmp/_m "$OUT/_logs/assemble_$1" 2>/dev/null || true; }
+marker() { echo "$2 $(date -u)" >/tmp/_m; gcloud storage cp /tmp/_m "$BASE/_logs/assemble_$1" 2>/dev/null || true; }
 cleanup() { local rc=$?; marker "EXIT_$rc" "exit $rc";
-  gcloud storage cp "$LOG" "$OUT/_logs/assemble.log" 2>/dev/null || true
+  gcloud storage cp "$LOG" "$BASE/_logs/assemble.log" 2>/dev/null || true
   gcloud compute instances delete "$NAME" --zone="$ZONE" --quiet || shutdown -h now; }
 trap cleanup EXIT
 ( sleep 7200; shutdown -h now ) &   # 2h safety
