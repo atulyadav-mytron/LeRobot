@@ -6,7 +6,7 @@ set -uo pipefail
 export PATH=/opt/conda/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 export DEBIAN_FRONTEND=noninteractive
 
-OUT="gs://narration-raw-delivery/lerobot_sample_10hr"
+OUT="gs://annotationportal-raw/lerobot_sample_10hr"
 SRC1="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1102"
 SRC2="gs://ots-egocentric-inventory/Garment_Factory_workbench/2026-04-28/1107"
 WORK=/home/work
@@ -53,8 +53,8 @@ git clone --depth 1 https://github.com/atulyadav-mytron/LeRobot.git repo
 
 echo "=== fetch MANO ==="
 mkdir -p /opt/mano
-gcloud storage cp "gs://narration-raw-delivery/mano/MANO_RIGHT.pkl" /opt/mano/ || true
-gcloud storage cp "gs://narration-raw-delivery/mano/MANO_LEFT.pkl"  /opt/mano/ || true
+gcloud storage cp "gs://annotationportal-raw/mano/MANO_RIGHT.pkl" /opt/mano/ || true
+gcloud storage cp "gs://annotationportal-raw/mano/MANO_LEFT.pkl"  /opt/mano/ || true
 # place MANO where WiLoR-mini commonly looks, too
 mkdir -p "$HOME/.cache/wilor_mini/mano_data" /opt/conda/lib/mano
 cp /opt/mano/MANO_*.pkl "$HOME/.cache/wilor_mini/mano_data/" 2>/dev/null || true
