@@ -64,6 +64,8 @@ class Log:
             with open(self.path, "a") as f:
                 f.write(line + "\n")
     def push(self):
+        if not self.out_gcs:
+            return
         try:
             sh(["gcloud", "storage", "cp", str(self.path), f"{self.out_gcs}/_logs/run.log"])
         except Exception:
@@ -247,7 +249,7 @@ def main():
               if Path(u).stem not in _failed and (dirs["hands"] / f"{Path(u).stem}.npz").exists()
               and (dirs["pose"] / f"{Path(u).stem}.tum").exists()]
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        list(ex.map(lambda s: _safe(quality_stage, s, dirs, log), usable))
+        list(ex.map(lambda s: _safe(quality_stage, s, dirs), usable))
     log(f"quality done for {len(usable)} clips ({len(_failed)} failed)")
     log.push()
 
